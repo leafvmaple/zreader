@@ -8,6 +8,10 @@
 frontend/node_modules
 frontend/dist
 frontend/.pnpm-store
+# pnpm 11+ settings file (allowBuilds for esbuild) — only needed by local
+# dev. The Dockerfile pins pnpm 9 via corepack, and pnpm 9 reads this file
+# as a workspace config and errors on the missing `packages:` field.
+frontend/pnpm-workspace.yaml
 
 # Backend build outputs and dev artifacts
 backend/data

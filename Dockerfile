@@ -38,8 +38,15 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 # --- Stage 3: minimal runtime image -----------------------------------------
 FROM alpine:3.20
+# UID 1000 / GID 10 ("wheel") matches the default admin user on most consumer
+# NASes (UGREEN UGOS Pro, Synology, QNAP). Bind-mounted shared folders are
+# typically owned by 1000:10 on those systems, so the container hits them as
+# owner — bypassing ACLs that may restrict "other". Override at run time with
+# `--user UID:GID` if your host uses different IDs.
 RUN apk add --no-cache ca-certificates tzdata wget \
- && addgroup -S zreader && adduser -S zreader -G zreader \
+ && addgroup -g 1000 -S zreader \
+ && adduser -u 1000 -G zreader -S zreader \
+ && addgroup zreader wheel \
  && mkdir -p /data /library \
  && chown -R zreader:zreader /data /library
 
