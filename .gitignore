@@ -33,6 +33,10 @@ vendor/
 backend/data/
 backend/cache/
 backend/log/
+
+# Host-side docker-compose mount points — local library + sqlite runtime.
+/books/
+/data/
 # Embedded SPA target. Built on demand; never committed.
 backend/internal/webui/dist/*
 !backend/internal/webui/dist/.gitkeep

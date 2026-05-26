@@ -21,16 +21,11 @@ Open <http://localhost:8080>, click the scan button, start reading.
 
 ### docker compose
 
-```yaml
-services:
-  zreader:
-    image: ghcr.io/leafvmaple/zreader:latest
-    ports: ["8080:8080"]
-    volumes:
-      - ./data:/data
-      - ./books:/library:ro
-    restart: unless-stopped
-```
+The repo ships a [`docker-compose.yml`](docker-compose.yml) configured to
+**build from source by default** — clone, drop your books into `./books/`,
+run `docker compose up -d --build`, done. See
+[Docker workflow](#docker-workflow) below for switching to the published
+image instead.
 
 ## Configuration
 
@@ -108,7 +103,38 @@ cd backend && go run ./cmd/zreader
 cd frontend && pnpm dev
 ```
 
-### Building the image yourself
+### Docker workflow
+
+The shipped `docker-compose.yml` is set up so the default action is **always
+build locally**, never pull from a registry:
+
+```yaml
+build: .                                  # use the local Dockerfile
+image: ghcr.io/leafvmaple/zreader:latest  # tag the build with the published name
+pull_policy: never                        # refuse to fall back to a registry pull
+```
+
+Why all three? `image:` alone tells compose to pull; `build:` alone produces
+an unhelpful `<project>_<service>` tag; the combination builds locally **and**
+tags the artifact with the same name it would have on GHCR, so dev and prod
+SHAs stay name-aligned. `pull_policy: never` closes the last hole — without
+it, compose's default `missing` policy would try `ghcr.io` first when the
+local image is absent.
+
+The cycle:
+
+1. **Develop** — edit code, then `docker compose up -d --build`. The `--build`
+   forces a rebuild from the working copy; without it, compose reuses the
+   existing local image. Iteration after the first build is fast (Go and
+   pnpm layers cache; only changed source re-runs).
+2. **Release** — once the local image works, push under the same tag:
+   `docker push ghcr.io/leafvmaple/zreader:latest`, or push a git tag and
+   let `.github/workflows/docker.yml` build & push it for you.
+3. **Consume** — to run the published image without cloning (e.g. on a NAS),
+   either use the `docker run` from [Quick start](#quick-start), or comment
+   out the `build:` and `pull_policy:` lines in the compose file.
+
+One-off build without compose:
 
 ```bash
 docker build -t zreader:dev .
