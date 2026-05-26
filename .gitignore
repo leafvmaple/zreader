@@ -1,0 +1,46 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors / IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*~
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+.pnpm-store/
+.npm/
+*.tsbuildinfo
+
+# Frontend build output (rebuilt on every `pnpm build`)
+frontend/dist/
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# Backend runtime artefacts
+backend/data/
+backend/cache/
+backend/log/
+# Embedded SPA target. Built on demand; never committed.
+backend/internal/webui/dist/*
+!backend/internal/webui/dist/.gitkeep
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Local sandbox for end-to-end backend tests
+.testdata/

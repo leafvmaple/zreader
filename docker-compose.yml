@@ -1,0 +1,19 @@
+services:
+  zreader:
+    image: ghcr.io/leafvmaple/zreader:latest
+    # For local development from source, comment out `image:` and uncomment:
+    # build: .
+    container_name: zreader
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Optional: override the listen port (host-side mapping above must match).
+      # ZREADER_PORT: "8080"
+      # Multiple library roots are colon-separated, e.g. "/library:/library2".
+      ZREADER_LIBRARY_PATH: "/library"
+    volumes:
+      # Persistent metadata: SQLite db + scan state.
+      - ./data:/data
+      # Your books. Point this at wherever your TXT files live.
+      - ./books:/library:ro

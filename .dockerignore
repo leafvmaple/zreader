@@ -1,0 +1,34 @@
+.git
+.github
+.vscode
+.idea
+.claude
+
+# Frontend
+frontend/node_modules
+frontend/dist
+frontend/.pnpm-store
+
+# Backend build outputs and dev artifacts
+backend/data
+backend/cache
+backend/log
+backend/internal/webui/dist
+backend/cmd/decodetest
+backend/cmd/dumpdb
+**/*.exe
+**/*.test
+**/*.out
+
+# Docs / test fixtures not needed at build time
+.testdata
+*.md
+LICENSE
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+*.log
