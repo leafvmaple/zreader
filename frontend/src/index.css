@@ -1,14 +1,14 @@
 :root {
-  --bg: #f7f3ea;
-  --surface: #ffffff;
-  --text: #2a221c;
-  --text-muted: #8a7c6f;
-  --accent: #78503c;
-  --border: rgba(120, 80, 60, 0.12);
-  --shadow: 0 4px 24px rgba(120, 80, 60, 0.08);
+  --bg: #2d3033;
+  --surface: #3a3d41;
+  --text: #d4d6d8;
+  --text-muted: #888c91;
+  --accent: #c5c7ca;
+  --border: rgba(255, 255, 255, 0.08);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Noto Serif SC', 'Microsoft YaHei', serif;
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Source Han Sans SC', sans-serif;
   color: var(--text);
   background: var(--bg);
 }
@@ -35,7 +35,7 @@ a {
 
 code {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  background: rgba(120, 80, 60, 0.08);
+  background: rgba(255, 255, 255, 0.06);
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 0.92em;

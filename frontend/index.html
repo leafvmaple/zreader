@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>zreader</title>
+    <!-- Optional reading webfonts. unicode-range-subsetted: the browser
+         only fetches the woff2 segments whose characters actually appear
+         on screen, and font-display:swap (already set in the upstream
+         CSS) means rendering is never blocked. -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-screen-webfont/style.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&display=swap"
+    />
   </head>
   <body>
     <div id="root"></div>

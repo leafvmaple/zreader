@@ -6,24 +6,45 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'PingFang SC',
-    'Microsoft YaHei', Georgia, serif;
-  --r-bg: #f7f3ea;
-  --r-fg: #2a221c;
-  --r-fg-muted: #8a7c6f;
-  --r-accent: #78503c;
+  --r-bg: #2d3033;
+  --r-fg: #d4d6d8;
+  --r-fg-muted: #888c91;
+  --r-accent: #c5c7ca;
   --r-line: 1.9;
   --r-fs-body: 18px;
   background: var(--r-bg);
   color: var(--r-fg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- Fonts --------------------------------------------------------------- */
+/* System falls back to platform default CJK serif then sans. The webfonts
+ * are unicode-range subsetted upstream + font-display:swap, so picking
+ * them never blocks first paint. */
+
+.reader--font-system {
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif CN',
+    'PingFang SC', 'Songti SC', 'STSong', SimSun, serif;
+}
+
+.reader--font-songti {
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif CN',
+    'PingFang SC', 'Songti SC', 'STSong', SimSun, serif;
+}
+
+.reader--font-wenkai {
+  font-family: 'LXGW WenKai Screen', 'LXGW WenKai', 'KaiTi', STKaiti,
+    'PingFang SC', serif;
 }
 
 /* --- Themes -------------------------------------------------------------- */
 
 .reader--theme-beige { --r-bg: #f7f3ea; --r-fg: #2a221c; --r-fg-muted: #8a7c6f; --r-accent: #78503c; }
-.reader--theme-white { --r-bg: #ffffff; --r-fg: #1c1c1e; --r-fg-muted: #777; --r-accent: #444; }
-.reader--theme-grey  { --r-bg: #d7d7d2; --r-fg: #2c2c2c; --r-fg-muted: #6a6a6a; --r-accent: #555; }
-.reader--theme-dark  { --r-bg: #1c1c1e; --r-fg: #d8d3cb; --r-fg-muted: #8b857d; --r-accent: #b4825f; }
+.reader--theme-white { --r-bg: #ffffff; --r-fg: #1c1c1e; --r-fg-muted: #777;    --r-accent: #444;    }
+.reader--theme-grey  { --r-bg: #2d3033; --r-fg: #d4d6d8; --r-fg-muted: #888c91; --r-accent: #c5c7ca; }
+.reader--theme-dark  { --r-bg: #2c2c2e; --r-fg: #b8b8ba; --r-fg-muted: #7a7a7c; --r-accent: #c8c8ca; }
 
 /* --- Sizes --------------------------------------------------------------- */
 
@@ -31,6 +52,21 @@
 .reader--size-md { --r-fs-body: 18px; }
 .reader--size-lg { --r-fs-body: 21px; }
 .reader--size-xl { --r-fs-body: 25px; }
+
+/* Light themes need dark overlay colors; dark themes need white overlays. */
+.reader--theme-beige,
+.reader--theme-white {
+  --r-overlay: rgba(0, 0, 0, 0.08);
+  --r-overlay-strong: rgba(0, 0, 0, 0.18);
+  --r-line-color: rgba(0, 0, 0, 0.1);
+}
+
+.reader--theme-grey,
+.reader--theme-dark {
+  --r-overlay: rgba(255, 255, 255, 0.06);
+  --r-overlay-strong: rgba(255, 255, 255, 0.14);
+  --r-line-color: rgba(255, 255, 255, 0.08);
+}
 
 /* --- Chrome bars --------------------------------------------------------- */
 
@@ -46,11 +82,10 @@
   gap: 12px;
   padding: 10px 16px;
   backdrop-filter: blur(8px);
-  border-color: rgba(120, 80, 60, 0.1);
 }
 
-.reader__top { top: 0; border-bottom: 1px solid var(--r-line, rgba(120, 80, 60, 0.1)); }
-.reader__bottom { bottom: 0; border-top: 1px solid var(--r-line, rgba(120, 80, 60, 0.1)); }
+.reader__top { top: 0; border-bottom: 1px solid var(--r-line-color); }
+.reader__bottom { bottom: 0; border-top: 1px solid var(--r-line-color); }
 
 .reader__top-title {
   flex: 1;
@@ -88,13 +123,13 @@
   user-select: none;
 }
 
-.reader__icon-btn:hover { background: rgba(120, 80, 60, 0.08); }
+.reader__icon-btn:hover { background: var(--r-overlay); }
 .reader__pct { cursor: default; font-size: 13px; color: var(--r-fg-muted); }
 
 .reader__progress-track {
   flex: 1;
   height: 4px;
-  background: rgba(120, 80, 60, 0.15);
+  background: var(--r-overlay-strong);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -113,6 +148,16 @@
   scroll-behavior: smooth;
   padding: 80px 24px 96px;
   cursor: text;
+  /* Hide the native scrollbar — only a small window of chapters is
+   * mounted at any time, so the native indicator misrepresents book
+   * position. The header `pct%` + footer progress track are the
+   * source of truth for "where you are". */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.reader__content::-webkit-scrollbar {
+  display: none;
 }
 
 .reader__article {
@@ -125,7 +170,7 @@
   font-weight: 600;
   margin: 56px 0 24px;
   padding-top: 24px;
-  border-top: 1px solid rgba(120, 80, 60, 0.12);
+  border-top: 1px solid var(--r-line-color);
   text-align: center;
   letter-spacing: 0.04em;
 }
@@ -154,7 +199,7 @@
   margin-top: 40vh;
 }
 
-.reader__error { color: #a33; }
+.reader__error { color: #e08585; }
 
 /* --- Drawers ------------------------------------------------------------- */
 
@@ -162,7 +207,7 @@
   position: fixed;
   inset: 0;
   z-index: 10;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   justify-content: flex-end;
 }
@@ -171,7 +216,7 @@
   width: min(360px, 86vw);
   background: var(--r-bg);
   color: var(--r-fg);
-  border-left: 1px solid rgba(120, 80, 60, 0.15);
+  border-left: 1px solid var(--r-line-color);
   display: flex;
   flex-direction: column;
   animation: slide-in 180ms ease;
@@ -189,7 +234,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(120, 80, 60, 0.12);
+  border-bottom: 1px solid var(--r-line-color);
 }
 
 .drawer__header h3 { margin: 0; font-size: 15px; font-weight: 500; }
@@ -222,7 +267,7 @@
   cursor: pointer;
 }
 
-.toc__item button:hover { background: rgba(120, 80, 60, 0.08); }
+.toc__item button:hover { background: var(--r-overlay); }
 .toc__item--active button { color: var(--r-accent); font-weight: 500; }
 
 /* --- Settings ------------------------------------------------------------ */
@@ -231,6 +276,47 @@
 .settings__row + .settings__row { margin-top: 22px; }
 .settings__label { display: block; color: var(--r-fg-muted); font-size: 13px; margin-bottom: 8px; }
 .settings__themes, .settings__sizes { display: flex; gap: 10px; }
+.settings__fonts { display: flex; flex-direction: column; gap: 8px; }
+
+.font-btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--r-overlay-strong);
+  background: transparent;
+  color: var(--r-fg);
+  cursor: pointer;
+  font-size: 14px;
+  text-align: left;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+
+.font-btn--system { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.font-btn--songti { font-family: 'Noto Serif SC', 'Source Han Serif SC', serif; }
+.font-btn--wenkai { font-family: 'LXGW WenKai Screen', 'LXGW WenKai', serif; }
+
+.font-btn:hover { background: var(--r-overlay); }
+.font-btn.is-active { border-color: var(--r-accent); color: var(--r-accent); }
+
+.settings__reset {
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: 1px solid var(--r-overlay-strong);
+  border-radius: 10px;
+  color: var(--r-fg);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  margin-bottom: 20px;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+
+.settings__reset:hover {
+  background: var(--r-overlay);
+  border-color: var(--r-accent);
+}
+
+.settings__reset:active { transform: translateY(1px); }
 
 .theme-swatch {
   width: 36px;
@@ -245,14 +331,14 @@
 
 .theme-swatch--beige { background: #f7f3ea; box-shadow: inset 0 0 0 1px rgba(120, 80, 60, 0.2); }
 .theme-swatch--white { background: #ffffff; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
-.theme-swatch--grey  { background: #d7d7d2; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1); }
-.theme-swatch--dark  { background: #1c1c1e; }
+.theme-swatch--grey  { background: #2d3033; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15); }
+.theme-swatch--dark  { background: #2c2c2e; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15); }
 
 .size-btn {
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  border: 1px solid rgba(120, 80, 60, 0.2);
+  border: 1px solid var(--r-overlay-strong);
   background: transparent;
   color: var(--r-fg);
   cursor: pointer;

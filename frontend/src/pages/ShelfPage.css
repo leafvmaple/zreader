@@ -55,22 +55,22 @@
   transition: transform 80ms ease, background 80ms ease;
 }
 
-.shelf__btn:hover { background: rgba(120, 80, 60, 0.05); }
+.shelf__btn:hover { background: rgba(255, 255, 255, 0.06); }
 .shelf__btn:active { transform: translateY(1px); }
 
 .shelf__btn--primary {
-  background: var(--accent);
-  color: #fff;
+  background: #4a5058;
+  color: #f5f5f5;
   border-color: transparent;
 }
 
-.shelf__btn--primary:hover { background: #6a4533; }
+.shelf__btn--primary:hover { background: #5a6068; }
 
 .shelf__btn:disabled { opacity: 0.6; cursor: progress; }
 
 .shelf__notice {
   padding: 10px 14px;
-  background: #ffffff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text-muted);
@@ -122,7 +122,7 @@
 
 .continue-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(120, 80, 60, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .continue-card__title {
@@ -142,7 +142,7 @@
 
 .continue-card__bar {
   height: 4px;
-  background: rgba(120, 80, 60, 0.1);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -179,7 +179,7 @@
   transition: background 80ms ease;
 }
 
-.book-row__link:hover { background: rgba(120, 80, 60, 0.04); }
+.book-row__link:hover { background: rgba(255, 255, 255, 0.04); }
 
 .book-row__title {
   font-size: 15px;
@@ -212,7 +212,7 @@
 
 .book-row__bar {
   height: 4px;
-  background: rgba(120, 80, 60, 0.1);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -234,7 +234,7 @@
   transition: background 80ms ease, color 80ms ease;
 }
 
-.book-row__link:hover .book-row__cta { background: var(--accent); color: #fff; }
+.book-row__link:hover .book-row__cta { background: var(--accent); color: var(--bg); }
 
 /* --- Responsive ---------------------------------------------------------- */
 

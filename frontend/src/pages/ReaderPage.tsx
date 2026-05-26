@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as api from '../api/client';
 import { useThrottledProgress } from '../hooks/useThrottledProgress';
@@ -7,11 +7,25 @@ import './ReaderPage.css';
 
 type Theme = 'beige' | 'white' | 'grey' | 'dark';
 type FontSize = 'sm' | 'md' | 'lg' | 'xl';
+type FontFamily = 'system' | 'songti' | 'wenkai';
 
-type Settings = { theme: Theme; size: FontSize };
+type Settings = { theme: Theme; size: FontSize; font: FontFamily };
 
-const DEFAULT_SETTINGS: Settings = { theme: 'beige', size: 'md' };
+const DEFAULT_SETTINGS: Settings = { theme: 'grey', size: 'md', font: 'songti' };
+
+const FONT_LABELS: Record<FontFamily, string> = {
+  system: '系统默认',
+  songti: '思源宋体',
+  wenkai: '霞鹜文楷',
+};
 const SETTINGS_KEY = 'zreader.settings';
+
+// Server caps content slice at 50k chars per request.
+const CHUNK = 50_000;
+
+// How close (in viewport heights) to a loaded edge before we fetch the
+// adjacent chapter.
+const PREFETCH_TRIGGER = 1.0;
 
 function loadSettings(): Settings {
   try {
@@ -31,45 +45,80 @@ function saveSettings(s: Settings) {
   }
 }
 
-type Segment =
-  | { kind: 'chapter'; idx: number; title: string }
-  | { kind: 'body'; paragraphs: string[] };
+// chapterCharRange returns [start, len) in char-offset units for a chapter
+// idx — the slice the reader needs to ask the backend for. The last
+// chapter's length is bounded by book.char_count.
+function chapterCharRange(
+  idx: number,
+  chapters: Chapter[],
+  total: number,
+): { start: number; len: number } | null {
+  const i = chapters.findIndex((c) => c.idx === idx);
+  if (i < 0) return null;
+  const start = chapters[i].char_offset;
+  const end = i + 1 < chapters.length ? chapters[i + 1].char_offset : total;
+  return { start, len: Math.max(0, end - start) };
+}
 
-// Splits the decoded UTF-8 text into a sequence of chapter markers + body
-// paragraphs. The chapter title line in the source text is consumed by the
-// chapter segment so it isn't rendered twice.
-//
-// We slice by JS string units (UTF-16 code units). For BMP characters
-// (including all common CJK), one code unit == one codepoint == one
-// char_offset from the backend, so the offsets line up. Astral plane chars
-// (some CJK extensions, emoji) would drift by 1 per occurrence; acceptable
-// for MVP TXT content.
-function buildSegments(text: string, chapters: Chapter[]): Segment[] {
-  const out: Segment[] = [];
-  const sorted = [...chapters].sort((a, b) => a.char_offset - b.char_offset);
-
-  // Filter to chapters whose offset is in-range — defensive against a stale
-  // chapters list pointing past the loaded content.
-  const valid = sorted.filter((c) => c.char_offset <= text.length);
-
-  let cursor = 0;
-  for (const ch of valid) {
-    if (ch.char_offset > cursor) {
-      const body = text.slice(cursor, ch.char_offset);
-      const paragraphs = body.split(/\n+/).map((p) => p.trim()).filter(Boolean);
-      if (paragraphs.length > 0) out.push({ kind: 'body', paragraphs });
-    }
-    const nl = text.indexOf('\n', ch.char_offset);
-    const titleEnd = nl < 0 ? text.length : nl;
-    const titleText = text.slice(ch.char_offset, titleEnd).trim() || ch.title;
-    out.push({ kind: 'chapter', idx: ch.idx, title: titleText });
-    cursor = titleEnd + 1;
+// fetchChapter pulls one chapter's text, chunked across CHUNK-sized slices
+// when needed. Returns the concatenated content with the chapter title
+// line as paragraph 0.
+async function fetchChapter(
+  bookId: number,
+  idx: number,
+  chapters: Chapter[],
+  total: number,
+): Promise<string> {
+  const range = chapterCharRange(idx, chapters, total);
+  if (!range || range.len === 0) return '';
+  let buf = '';
+  let cursor = range.start;
+  const endChar = range.start + range.len;
+  while (cursor < endChar) {
+    const slice = await api.getContent(bookId, cursor, Math.min(CHUNK, endChar - cursor));
+    buf += slice.text;
+    cursor = slice.from + slice.len;
+    if (slice.eof || slice.len === 0) break;
   }
-  if (cursor < text.length) {
-    const tail = text.slice(cursor).split(/\n+/).map((p) => p.trim()).filter(Boolean);
-    if (tail.length > 0) out.push({ kind: 'body', paragraphs: tail });
+  return buf;
+}
+
+function chapterIdxAtOffset(offset: number, chapters: Chapter[]): number {
+  if (chapters.length === 0) return 1;
+  let idx = chapters[0].idx;
+  for (const c of chapters) {
+    if (c.char_offset <= offset) idx = c.idx;
+    else break;
   }
-  return out;
+  return idx;
+}
+
+// renderChapter splits a chapter's formatted text into a title heading
+// plus paragraph nodes. The backend's format pass emits chapters as
+// `<title>\n\n<para>\n\n<para>…`, so the first paragraph (split on blank
+// lines, trimmed) is the title.
+function renderChapter(
+  idx: number,
+  text: string,
+  fallbackTitle: string,
+): React.ReactNode {
+  const paragraphs = text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+  const titleText = paragraphs[0] ?? fallbackTitle;
+  const bodyParas = paragraphs.slice(1);
+  return (
+    <Fragment key={idx}>
+      <h2 id={`chap-${idx}`} className="reader__chapter">
+        {titleText}
+      </h2>
+      {bodyParas.length > 0 && (
+        <div className="reader__body">
+          {bodyParas.map((p, i) => (
+            <p key={i}>{p}</p>
+          ))}
+        </div>
+      )}
+    </Fragment>
+  );
 }
 
 export function ReaderPage() {
@@ -79,7 +128,14 @@ export function ReaderPage() {
 
   const [book, setBook] = useState<Book | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [text, setText] = useState('');
+
+  // Per-chapter content cache. We never evict — re-visiting a previously
+  // read chapter via scroll-up or TOC jump is a memory hit, not a refetch.
+  const [chapterText, setChapterText] = useState<Map<number, string>>(new Map());
+  // Currently rendered contiguous window of chapter idxs. Null until the
+  // first chapter lands. Always a contiguous range (TOC jumps reset it).
+  const [loadedRange, setLoadedRange] = useState<{ lo: number; hi: number } | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,29 +151,38 @@ export function ReaderPage() {
   // Set after the initial scroll-to-saved-position fires, so the scroll
   // listener doesn't immediately overwrite the server progress with 0.
   const initialised = useRef(false);
+  // Track in-flight chapter fetches to dedupe scroll-burst extension calls.
+  const fetchingRef = useRef<Set<number>>(new Set());
+  // Char-offset waiting to be applied to scrollTop after the target
+  // chapter's DOM is committed. Used by both cold start and cross-window
+  // TOC jumps; the useLayoutEffect below consumes it when the right
+  // chapter is in the DOM.
+  const pendingScrollRef = useRef<number | null>(null);
 
   const { report, flush } = useThrottledProgress({
     bookId,
     onConflict: (server) => {
-      // Another device is ahead — adopt its position.
-      const total = book?.char_count ?? 0;
-      if (total > 0 && scrollRef.current) {
-        const el = scrollRef.current;
-        const target = (server.char_offset / total) * (el.scrollHeight - el.clientHeight);
-        el.scrollTo({ top: target, behavior: 'smooth' });
-      }
+      // Server has a newer position from another device — adopt it.
+      // Falls back to a chapter jump (precise within-chapter offset is
+      // skipped for simplicity).
+      void jumpToOffset(server.char_offset);
     },
   });
 
-  // --- Load the book + saved progress -------------------------------------
+  // --- Initial load -------------------------------------------------------
+  // Loads only the chapter containing the saved progress (or chapter 1 if
+  // no saved progress). Adjacent chapters are pre-fetched in the
+  // background after first paint.
 
   useEffect(() => {
     if (!Number.isFinite(bookId)) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setText('');
+    setChapterText(new Map());
+    setLoadedRange(null);
     initialised.current = false;
+    fetchingRef.current.clear();
 
     (async () => {
       try {
@@ -129,87 +194,294 @@ export function ReaderPage() {
         setBook(book);
         setChapters(chapters);
 
-        // Pull content in 50k-char chunks (server cap) and concatenate.
-        const total = book.char_count ?? 0;
-        const CHUNK = 50_000;
-        let buffer = '';
-        let cursor = 0;
-        while (cursor < total || total === 0) {
-          const slice = await api.getContent(bookId, cursor, CHUNK);
-          if (cancelled) return;
-          buffer += slice.text;
-          cursor = slice.from + slice.len;
-          if (slice.eof) break;
-          // Defensive: tiny books that report total=0 still terminate via eof.
-          if (slice.len === 0) break;
-        }
-        if (cancelled) return;
-        setText(buffer);
-
-        // Defer scroll to next frame so the DOM has measured the content.
-        requestAnimationFrame(() => {
-          const el = scrollRef.current;
-          if (!el || !progress) {
-            initialised.current = true;
-            return;
-          }
-          if (progress.char_offset > 0 && total > 0) {
-            const ratio = progress.char_offset / total;
-            el.scrollTop = Math.max(0, ratio * (el.scrollHeight - el.clientHeight));
-          }
+        if (chapters.length === 0) {
+          setLoading(false);
           initialised.current = true;
-        });
+          return;
+        }
+
+        const total = book.char_count ?? 0;
+        const targetIdx = progress
+          ? chapterIdxAtOffset(progress.char_offset, chapters)
+          : chapters[0].idx;
+
+        // Queue the saved scroll position; the useLayoutEffect below
+        // applies it once the initial chapter is committed to the DOM.
+        // Doing this via raf before commit would race React's render and
+        // land at scrollTop=0 (the symptom of "opens at chapter top").
+        if (progress && progress.char_offset > 0) {
+          pendingScrollRef.current = progress.char_offset;
+        } else {
+          initialised.current = true;
+        }
+
+        const text = await fetchChapter(bookId, targetIdx, chapters, total);
+        if (cancelled) return;
+        setChapterText(new Map([[targetIdx, text]]));
+        setLoadedRange({ lo: targetIdx, hi: targetIdx });
+        setCurrentChapter(targetIdx);
+        setLoading(false);
+
+        // Pre-fetch ±1 into the cache so adjacent navigation feels
+        // instant. We deliberately DO NOT extend loadedRange on the
+        // prev side here — prepending DOM above the current scroll
+        // position would push the reader visibly downward (the "jumps
+        // to chapter 1" bug). Instead, extendUp consults the cache on
+        // first upward scroll and prepends *with* scrollTop
+        // compensation in one frame, no visible jump.
+        const prefetchCache = async (idx: number) => {
+          if (cancelled || idx === targetIdx) return;
+          if (chapters.findIndex((c) => c.idx === idx) < 0) return;
+          if (fetchingRef.current.has(idx)) return;
+          fetchingRef.current.add(idx);
+          try {
+            const t = await fetchChapter(bookId, idx, chapters, total);
+            if (cancelled) return;
+            setChapterText((prev) => {
+              if (prev.has(idx)) return prev;
+              const next = new Map(prev);
+              next.set(idx, t);
+              return next;
+            });
+            // Only auto-extend on the trailing edge — appending below
+            // current scroll never jumps the user's viewport.
+            if (idx === targetIdx + 1) {
+              setLoadedRange((r) => (r && r.hi + 1 === idx ? { ...r, hi: idx } : r));
+            }
+          } finally {
+            fetchingRef.current.delete(idx);
+          }
+        };
+        void prefetchCache(targetIdx + 1);
+        void prefetchCache(targetIdx - 1);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
         setLoading(false);
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookId]);
 
-  // --- Persist settings ----------------------------------------------------
+  // --- Persist settings ---------------------------------------------------
 
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
 
-  // --- Scroll → progress updates ------------------------------------------
+  // --- Scroll-to-offset, single source of truth --------------------------
+  // Walks the DOM for the chapter that contains `charOffset` (must be in
+  // the currently loaded window) and sets el.scrollTop based on the
+  // chapter's measured top + within-chapter ratio. Returns false when
+  // anchoring isn't possible yet (DOM not committed / out of window) so
+  // the caller can keep the pending request alive.
 
-  const segments = useMemo(() => buildSegments(text, chapters), [text, chapters]);
+  const applyScrollFromOffset = useCallback(
+    (charOffset: number): boolean => {
+      if (!book || chapters.length === 0 || !loadedRange) return false;
+      const el = scrollRef.current;
+      if (!el) return false;
+
+      const targetIdx = chapterIdxAtOffset(charOffset, chapters);
+      if (targetIdx < loadedRange.lo || targetIdx > loadedRange.hi) return false;
+
+      const anchor = document.getElementById(`chap-${targetIdx}`);
+      if (!anchor) return false;
+
+      const total = book.char_count ?? 0;
+      const ch = chapters.find((c) => c.idx === targetIdx);
+      const range = chapterCharRange(targetIdx, chapters, total);
+      const next = document.getElementById(`chap-${targetIdx + 1}`);
+      const chapterTop = anchor.offsetTop;
+      const chapterBottom = next ? next.offsetTop : el.scrollHeight;
+      const chapterHeight = Math.max(0, chapterBottom - chapterTop);
+      const within =
+        ch && range && range.len > 0
+          ? Math.max(0, Math.min(1, (charOffset - ch.char_offset) / range.len))
+          : 0;
+
+      el.scrollTop = chapterTop + within * chapterHeight;
+      return true;
+    },
+    [book, chapters, loadedRange],
+  );
+
+  // --- Apply pending scroll after DOM commit -----------------------------
+  // Single layout effect handles both cold start AND cross-window TOC
+  // jumps. Anything that needs to scroll to a specific char_offset
+  // *after* the target chapter is rendered just sets pendingScrollRef
+  // and triggers a state change; this effect picks it up.
+  //
+  // useLayoutEffect (not rAF) is critical here: it runs synchronously
+  // after React's commit and before the browser paints, so the new
+  // chapter's anchor and scrollHeight are measurable. rAF in async
+  // contexts can race the commit and was the root cause of "opens at
+  // chapter top" + "TOC jumps to wrong chapter".
+
+  useLayoutEffect(() => {
+    if (pendingScrollRef.current === null) return;
+    const applied = applyScrollFromOffset(pendingScrollRef.current);
+    if (applied) {
+      pendingScrollRef.current = null;
+      initialised.current = true;
+    }
+  }, [loadedRange, chapters, book, applyScrollFromOffset]);
+
+  // --- Window extension on scroll ----------------------------------------
+  // When the viewport gets within PREFETCH_TRIGGER × clientHeight of an
+  // edge, fetch the adjacent chapter and grow the window. extendUp also
+  // restores scrollTop so prepending content doesn't visibly jump the
+  // reader downward.
+
+  const extendDown = useCallback(async () => {
+    if (!book || !loadedRange) return;
+    const total = book.char_count ?? 0;
+    const next = loadedRange.hi + 1;
+    if (chapters.findIndex((c) => c.idx === next) < 0) return;
+    if (fetchingRef.current.has(next)) return;
+    fetchingRef.current.add(next);
+    try {
+      const text = await fetchChapter(bookId, next, chapters, total);
+      setChapterText((prev) => new Map(prev).set(next, text));
+      setLoadedRange((r) => (r && r.hi + 1 === next ? { ...r, hi: next } : r));
+    } finally {
+      fetchingRef.current.delete(next);
+    }
+  }, [bookId, book, chapters, loadedRange]);
+
+  const extendUp = useCallback(async () => {
+    if (!book || !loadedRange) return;
+    const total = book.char_count ?? 0;
+    const prev = loadedRange.lo - 1;
+    if (chapters.findIndex((c) => c.idx === prev) < 0) return;
+    if (fetchingRef.current.has(prev)) return;
+
+    const el = scrollRef.current;
+    const prevScrollHeight = el?.scrollHeight ?? 0;
+    const prevScrollTop = el?.scrollTop ?? 0;
+
+    // The compensation pass runs after React commits the prepended
+    // chapter. We schedule it via rAF so the new layout is measurable;
+    // useLayoutEffect would be tighter, but only fires after the next
+    // dep change, which is exactly the loadedRange transition we
+    // trigger here — too brittle, easier to stick with rAF.
+    const compensate = () => {
+      const after = scrollRef.current;
+      if (!after) return;
+      const delta = after.scrollHeight - prevScrollHeight;
+      if (delta > 0) after.scrollTop = prevScrollTop + delta;
+    };
+
+    // Cache hit — no network round trip, just unhide the chapter.
+    if (chapterText.has(prev)) {
+      setLoadedRange((r) => (r && r.lo - 1 === prev ? { ...r, lo: prev } : r));
+      requestAnimationFrame(compensate);
+      return;
+    }
+
+    fetchingRef.current.add(prev);
+    try {
+      const text = await fetchChapter(bookId, prev, chapters, total);
+      setChapterText((p) => new Map(p).set(prev, text));
+      setLoadedRange((r) => (r && r.lo - 1 === prev ? { ...r, lo: prev } : r));
+      requestAnimationFrame(compensate);
+    } finally {
+      fetchingRef.current.delete(prev);
+    }
+  }, [bookId, book, chapters, chapterText, loadedRange]);
+
+  // --- Jump to absolute char offset (TOC click, conflict resolution) ------
+
+  const jumpToOffset = useCallback(
+    async (charOffset: number) => {
+      if (!book || chapters.length === 0) return;
+      const total = book.char_count ?? 0;
+      const targetIdx = chapterIdxAtOffset(charOffset, chapters);
+
+      const inWindow =
+        loadedRange && targetIdx >= loadedRange.lo && targetIdx <= loadedRange.hi;
+      if (inWindow) {
+        // Chapter is already in DOM — scroll synchronously, no render trip.
+        applyScrollFromOffset(charOffset);
+        return;
+      }
+
+      // Target chapter is outside the loaded window. Queue the scroll,
+      // then mutate state to render the new chapter. The layout effect
+      // fires after React commits the new chapter and applies the scroll
+      // — using rAF here was racing the commit and landed on stale DOM
+      // (the "click 5, see 2" bug).
+      pendingScrollRef.current = charOffset;
+      setLoading(true);
+      const text = await fetchChapter(bookId, targetIdx, chapters, total);
+      setChapterText(new Map([[targetIdx, text]]));
+      setLoadedRange({ lo: targetIdx, hi: targetIdx });
+      setLoading(false);
+    },
+    [bookId, book, chapters, loadedRange, applyScrollFromOffset],
+  );
+
+  // --- Scroll → progress + extension triggers ----------------------------
 
   const onScroll = useCallback(() => {
-    if (!initialised.current || !book) return;
+    if (!initialised.current || !book || !loadedRange) return;
     const el = scrollRef.current;
     if (!el) return;
-    const scrollable = Math.max(1, el.scrollHeight - el.clientHeight);
-    const ratio = Math.min(1, Math.max(0, el.scrollTop / scrollable));
-    setPct(Math.round(ratio * 100));
-    const total = book.char_count ?? 0;
-    if (total > 0) {
-      const charOffset = Math.round(ratio * total);
-      // Figure out the current chapter index by walking chapters in order.
-      let idx = 1;
-      for (const c of chapters) {
-        if (c.char_offset <= charOffset) idx = c.idx;
-        else break;
-      }
-      setCurrentChapter(idx);
-      const ch = chapters.find((c) => c.idx === idx);
-      report({
-        char_offset: charOffset,
-        chapter_idx: idx,
-        chapter_offset: ch ? Math.max(0, charOffset - ch.char_offset) : 0,
-      });
-    }
-  }, [book, chapters, report]);
 
-  // --- Keyboard nav --------------------------------------------------------
+    // Find which loaded chapter contains the viewport-top anchor.
+    const viewport = el.clientHeight;
+    const scrollTop = el.scrollTop;
+    const total = book.char_count ?? 0;
+
+    let activeIdx = loadedRange.lo;
+    let activeTop = 0;
+    let activeHeight = el.scrollHeight;
+    for (let idx = loadedRange.lo; idx <= loadedRange.hi; idx++) {
+      const anchor = document.getElementById(`chap-${idx}`);
+      if (!anchor) continue;
+      const next = document.getElementById(`chap-${idx + 1}`);
+      const top = anchor.offsetTop;
+      const bottom = next ? next.offsetTop : el.scrollHeight;
+      if (scrollTop + 1 < bottom) {
+        activeIdx = idx;
+        activeTop = top;
+        activeHeight = Math.max(1, bottom - top);
+        break;
+      }
+    }
+    setCurrentChapter(activeIdx);
+
+    if (total > 0) {
+      const ch = chapters.find((c) => c.idx === activeIdx);
+      if (ch) {
+        const within = Math.max(0, Math.min(1, (scrollTop - activeTop) / activeHeight));
+        const range = chapterCharRange(activeIdx, chapters, total);
+        const len = range?.len ?? 0;
+        const absOffset = Math.min(total, ch.char_offset + Math.floor(within * len));
+        setPct(Math.round((absOffset / total) * 100));
+        report({
+          char_offset: absOffset,
+          chapter_idx: activeIdx,
+          chapter_offset: Math.max(0, absOffset - ch.char_offset),
+        });
+      }
+    }
+
+    // Trigger window extension when within PREFETCH_TRIGGER viewports of
+    // an edge.
+    if (el.scrollHeight - (scrollTop + viewport) < viewport * PREFETCH_TRIGGER) {
+      void extendDown();
+    }
+    if (scrollTop < viewport * PREFETCH_TRIGGER) {
+      void extendUp();
+    }
+  }, [book, chapters, loadedRange, report, extendDown, extendUp]);
+
+  // --- Keyboard nav -------------------------------------------------------
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -245,18 +517,44 @@ export function ReaderPage() {
     setShowChrome((v) => !v);
   }, []);
 
-  const onChapterClick = useCallback((idx: number) => {
-    setShowTOC(false);
-    requestAnimationFrame(() => {
-      const anchor = document.getElementById(`chap-${idx}`);
-      anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+  const onChapterClick = useCallback(
+    (idx: number) => {
+      setShowTOC(false);
+      const target = chapters.find((c) => c.idx === idx);
+      if (!target) return;
+      void jumpToOffset(target.char_offset);
+    },
+    [chapters, jumpToOffset],
+  );
+
+  const onResetSettings = useCallback(() => {
+    try {
+      localStorage.removeItem(SETTINGS_KEY);
+    } catch {
+      /* ignore */
+    }
+    setSettings(DEFAULT_SETTINGS);
   }, []);
 
-  // --- Render --------------------------------------------------------------
+  // --- Render -------------------------------------------------------------
 
-  const themeClass = `reader reader--theme-${settings.theme} reader--size-${settings.size}`;
+  const themeClass = `reader reader--theme-${settings.theme} reader--size-${settings.size} reader--font-${settings.font}`;
   const currentChapterTitle = chapters.find((c) => c.idx === currentChapter)?.title ?? '';
+
+  const renderedChapters: React.ReactNode[] = [];
+  if (loadedRange) {
+    for (let idx = loadedRange.lo; idx <= loadedRange.hi; idx++) {
+      const text = chapterText.get(idx);
+      if (text === undefined) continue;
+      const meta = chapters.find((c) => c.idx === idx);
+      renderedChapters.push(renderChapter(idx, text, meta?.title ?? ''));
+    }
+  }
+
+  const atBookEnd =
+    loadedRange !== null &&
+    chapters.length > 0 &&
+    loadedRange.hi === chapters[chapters.length - 1].idx;
 
   return (
     <div className={themeClass}>
@@ -275,6 +573,14 @@ export function ReaderPage() {
             <div className="reader__chap-title">{currentChapterTitle}</div>
           </div>
           <div className="reader__icon-btn reader__pct">{pct}%</div>
+          <button
+            className="reader__icon-btn"
+            onClick={() => setShowSettings(true)}
+            aria-label="阅读设置"
+            title="设置"
+          >
+            ⚙
+          </button>
         </header>
       )}
 
@@ -288,20 +594,8 @@ export function ReaderPage() {
         {loading && !error && <p className="reader__loading">加载中…</p>}
         {!loading && !error && (
           <article className="reader__article">
-            {segments.map((seg, i) =>
-              seg.kind === 'chapter' ? (
-                <h2 key={`c-${i}`} id={`chap-${seg.idx}`} className="reader__chapter">
-                  {seg.title}
-                </h2>
-              ) : (
-                <div key={`b-${i}`} className="reader__body">
-                  {seg.paragraphs.map((p, j) => (
-                    <p key={j}>{p}</p>
-                  ))}
-                </div>
-              ),
-            )}
-            <div className="reader__end">— 完 —</div>
+            {renderedChapters}
+            {atBookEnd && <div className="reader__end">— 完 —</div>}
           </article>
         )}
       </div>
@@ -379,6 +673,13 @@ export function ReaderPage() {
               </button>
             </header>
             <div className="settings">
+              <button
+                type="button"
+                className="settings__reset"
+                onClick={onResetSettings}
+              >
+                恢复默认设置
+              </button>
               <div className="settings__row">
                 <span className="settings__label">主题</span>
                 <div className="settings__themes">
@@ -402,6 +703,20 @@ export function ReaderPage() {
                       onClick={() => setSettings((s) => ({ ...s, size: sz }))}
                     >
                       A
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings__row">
+                <span className="settings__label">字体</span>
+                <div className="settings__fonts">
+                  {(['system', 'songti', 'wenkai'] as FontFamily[]).map((f) => (
+                    <button
+                      key={f}
+                      className={`font-btn font-btn--${f}${settings.font === f ? ' is-active' : ''}`}
+                      onClick={() => setSettings((s) => ({ ...s, font: f }))}
+                    >
+                      {FONT_LABELS[f]}
                     </button>
                   ))}
                 </div>
