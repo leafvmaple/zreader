@@ -48,3 +48,10 @@ backend/internal/webui/dist/*
 
 # Local sandbox for end-to-end backend tests
 .testdata/
+
+# Stray API-response dumps from manual curl debugging.
+.tmp_*.json
+
+# Frontend uses pnpm; npm's lockfile only shows up if someone runs
+# `npm install` by accident — never commit it.
+frontend/package-lock.json
