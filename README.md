@@ -2,7 +2,7 @@
 
 A self-hosted TXT reader. Point it at a directory of `.txt` files; it scans,
 detects encoding, parses chapters, and gives you a web reader with
-cross-device progress sync. Single binary, single container.
+cross-device progress sync. Single binary, single ~23 MB container.
 
 > Status: **MVP**. TXT only for now. EPUB / PDF / MOBI are on the roadmap.
 
@@ -14,10 +14,21 @@ docker run -d \
   -p 8080:8080 \
   -v $(pwd)/data:/data \
   -v /path/to/your/books:/library \
-  ghcr.io/leafvmaple/zreader:latest
+  leafvmaple/zreader:latest
 ```
 
 Open <http://localhost:8080>, click the scan button, start reading.
+
+### Where the image is published
+
+| Registry             | Image                               |
+| -------------------- | ----------------------------------- |
+| Docker Hub (default) | `leafvmaple/zreader:latest`         |
+| GHCR                 | `ghcr.io/leafvmaple/zreader:latest` |
+
+Both registries serve the same image. Docker Hub is the default `docker pull`
+target — no `--registry` flag needed. Architectures: `linux/amd64`,
+`linux/arm64`.
 
 ### docker compose
 
@@ -44,17 +55,40 @@ docker run ... \
   -v /mnt/novels:/novels:ro \
   -v /mnt/tech-books:/tech:ro \
   -e ZREADER_LIBRARY_PATH=/novels:/tech \
-  ghcr.io/leafvmaple/zreader:latest
+  leafvmaple/zreader:latest
 ```
+
+## NAS deployment
+
+The container runs as **UID 1000 / GID 1000**, with `wheel` (GID 10) as a
+supplementary group. This matches the default admin user on UGREEN UGOS Pro,
+Synology, and QNAP — bind-mounted shared folders (typically owned by
+`1000:10`) are accessible out of the box even when POSIX ACLs restrict
+"other" access.
+
+If your host uses a different admin UID, override at run time:
+
+```yaml
+services:
+  zreader:
+    image: leafvmaple/zreader:latest
+    user: "1005:100"     # match your host owner's UID:GID
+    ...
+```
+
+The `./data` host directory must also be owned by the running UID so SQLite
+can write to it.
 
 ## What works
 
 - TXT only (UTF-8 BOM / UTF-8 / GBK / GB18030 / pure ASCII auto-detect)
-- Chapter parsing: Chinese `第X章/节/回/卷`, English `Chapter N`. Falls back to
-  a single "正文" chapter when no markers are found.
+- Chapter parsing: Chinese `第X章/节/回/卷`, English `Chapter N`, bracketed
+  CJK numerals (`「一」`, `【3】`, `〈12〉`). Falls back to a single "正文"
+  chapter when no markers are found.
 - Library scan: incremental — re-scanning skips files whose mtime+size match.
-- Reading view: scroll reading, chapter drawer, 4 themes × 4 font sizes,
-  progress auto-sync (with stale-write protection).
+- Reading view: per-chapter lazy load, chapter drawer, 4 themes × 4 font
+  sizes, font picker (system / 思源宋体 / 霞鹜文楷), progress auto-sync
+  with stale-write protection.
 - Keyboard: ←/→/PageUp/PageDown/Space turn pages, Home/End jump, Esc closes.
 
 ## What's missing
@@ -110,16 +144,16 @@ build locally**, never pull from a registry:
 
 ```yaml
 build: .                                  # use the local Dockerfile
-image: ghcr.io/leafvmaple/zreader:latest  # tag the build with the published name
+image: docker.io/leafvmaple/zreader:latest  # tag the build with the published name
 pull_policy: never                        # refuse to fall back to a registry pull
 ```
 
 Why all three? `image:` alone tells compose to pull; `build:` alone produces
 an unhelpful `<project>_<service>` tag; the combination builds locally **and**
-tags the artifact with the same name it would have on GHCR, so dev and prod
-SHAs stay name-aligned. `pull_policy: never` closes the last hole — without
-it, compose's default `missing` policy would try `ghcr.io` first when the
-local image is absent.
+tags the artifact with the same name it would have on Docker Hub, so dev and
+prod SHAs stay name-aligned. `pull_policy: never` closes the last hole —
+without it, compose's default `missing` policy would try `docker.io` first
+when the local image is absent.
 
 The cycle:
 
@@ -127,9 +161,15 @@ The cycle:
    forces a rebuild from the working copy; without it, compose reuses the
    existing local image. Iteration after the first build is fast (Go and
    pnpm layers cache; only changed source re-runs).
-2. **Release** — once the local image works, push under the same tag:
-   `docker push ghcr.io/leafvmaple/zreader:latest`, or push a git tag and
-   let `.github/workflows/docker.yml` build & push it for you.
+2. **Release** — push a git tag `vX.Y.Z` and let
+   [`.github/workflows/docker.yml`](.github/workflows/docker.yml) build &
+   push it to Docker Hub + GHCR. Or push manually:
+
+   ```bash
+   docker push docker.io/leafvmaple/zreader:vX.Y.Z
+   docker push docker.io/leafvmaple/zreader:latest
+   ```
+
 3. **Consume** — to run the published image without cloning (e.g. on a NAS),
    either use the `docker run` from [Quick start](#quick-start), or comment
    out the `build:` and `pull_policy:` lines in the compose file.
