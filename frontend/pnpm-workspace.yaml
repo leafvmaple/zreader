@@ -1,0 +1,6 @@
+# pnpm 11+ requires explicit per-package opt-in for install lifecycle
+# scripts (defence against supply-chain postinstall payloads). esbuild
+# needs its postinstall to drop the platform-specific native binary;
+# without it Vite errors at startup with "failed to load esbuild".
+allowBuilds:
+  esbuild: true
