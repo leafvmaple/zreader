@@ -52,6 +52,26 @@ RUN apk add --no-cache ca-certificates tzdata wget \
 
 COPY --from=backend /out/zreader /usr/local/bin/zreader
 
+# OCI image annotations — surfaced by `docker inspect`, `docker scout`,
+# GHCR/Docker Hub UIs, and most container registries. BUILD_DATE and
+# VCS_REF are passed at build time; VERSION is re-declared here because
+# ARG values don't cross FROM boundaries.
+ARG VERSION=docker
+ARG BUILD_DATE
+ARG VCS_REF
+LABEL org.opencontainers.image.title="zreader" \
+      org.opencontainers.image.description="Self-hosted TXT reader: scans a directory of plain-text books, splits chapters automatically (CJK + bracketed-numeral support), and serves a React SPA for browsing and reading with per-device progress sync." \
+      org.opencontainers.image.url="https://github.com/leafvmaple/zreader" \
+      org.opencontainers.image.source="https://github.com/leafvmaple/zreader" \
+      org.opencontainers.image.documentation="https://github.com/leafvmaple/zreader/blob/main/README.md" \
+      org.opencontainers.image.vendor="leafvmaple" \
+      org.opencontainers.image.authors="Zohar Lee <leafvmaple@gmail.com>" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.base.name="alpine:3.20"
+
 ENV ZREADER_PORT=8080 \
     ZREADER_DATA_DIR=/data \
     ZREADER_LIBRARY_PATH=/library
