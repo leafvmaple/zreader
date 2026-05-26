@@ -5,7 +5,10 @@ services:
     # artifact. To consume the published image instead (no local toolchain),
     # comment out the `build:` block.
     build: .
-    image: ghcr.io/leafvmaple/zreader:latest
+    image: docker.io/leafvmaple/zreader:latest
+    # For local builds set `pull_policy: never` to skip the registry pull.
+    # On a NAS / remote host without this checkout, remove `build:` above
+    # and let Docker pull `docker.io/leafvmaple/zreader:latest` instead.
     pull_policy: never
     container_name: zreader
     restart: unless-stopped

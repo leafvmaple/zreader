@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # --- Stage 1: build the React SPA -------------------------------------------
 FROM node:22-alpine AS frontend
 WORKDIR /src/frontend
