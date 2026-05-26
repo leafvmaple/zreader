@@ -13,7 +13,7 @@ docker run -d \
   --name zreader \
   -p 8080:8080 \
   -v $(pwd)/data:/data \
-  -v /path/to/your/books:/library:ro \
+  -v /path/to/your/books:/library \
   ghcr.io/leafvmaple/zreader:latest
 ```
 
@@ -138,7 +138,7 @@ One-off build without compose:
 
 ```bash
 docker build -t zreader:dev .
-docker run --rm -p 8080:8080 -v $(pwd)/testbooks:/library:ro zreader:dev
+docker run --rm -p 8080:8080 -v $(pwd)/testbooks:/library zreader:dev
 ```
 
 ## License
