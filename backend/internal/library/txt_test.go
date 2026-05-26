@@ -39,6 +39,43 @@ func TestParseChapters_NoMatches_Synthetic(t *testing.T) {
 	}
 }
 
+func TestParseChapters_BracketedNumerals(t *testing.T) {
+	// 「一」/「二」/「三」 — the chapter convention used by 《十景缎》.
+	// Bracketed CJK numerals should land in the primary tier without
+	// needing the loose fallback.
+	text := "十景缎\n\n「一」\n第一段内容。\n\n「二」\n第二段内容。\n\n「三」\n第三段内容。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 3 {
+		t.Fatalf("want 3, got %d: %+v", len(out), out)
+	}
+	if out[0].Title != "「一」" || out[1].Title != "「二」" || out[2].Title != "「三」" {
+		t.Fatalf("title mismatch: %+v", out)
+	}
+}
+
+func TestParseChapters_BracketedVariants(t *testing.T) {
+	// Mix of bracket styles + Arabic + multi-digit numerals.
+	text := "【一】\nA\n〈二〉\nB\n『3』\nC\n[二十]\nD\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 4 {
+		t.Fatalf("want 4, got %d: %+v", len(out), out)
+	}
+}
+
+func TestParseChapters_BracketedNotInsideDialog(t *testing.T) {
+	// 「...」 used for dialog (non-numeric body) must NOT match.
+	text := "「我来啦」他说。\n「真的吗？」她答道。\n第一章 起\n内容\n第二章 承\n内容\n第三章 转\n内容\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 3 {
+		t.Fatalf("want 3 (dialog lines ignored), got %d: %+v", len(out), out)
+	}
+	for _, c := range out {
+		if strings.HasPrefix(c.Title, "「") {
+			t.Fatalf("dialog line leaked into chapters: %+v", c)
+		}
+	}
+}
+
 func TestParseChapters_LooseAloneNotEnough(t *testing.T) {
 	// Single bare digit on its own — below loose threshold, should fall through to synthetic.
 	text := "some prose\n\n7\n\nmore prose\n"
@@ -98,6 +135,35 @@ func TestParseChapters_ZhuChanJi(t *testing.T) {
 	meta := DetectMetadata(text)
 	if meta.Title != "铸蝉记" || meta.Author != "轩辕悬" {
 		t.Fatalf("expected {铸蝉记, 轩辕悬}, got %+v", meta)
+	}
+}
+
+// Smoke test against 《十景缎》 — bracketed CJK-numeral chapter markers
+// (「一」/「二」/...). Skipped when the file is absent.
+func TestParseChapters_ShiJingDuan(t *testing.T) {
+	const path = "../../../books/十景缎 - 佚名.txt"
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("test book not present: %v", err)
+	}
+	_, text, err := DetectAndDecode(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	out := ParseChapters(text, nil)
+	t.Logf("got %d chapters", len(out))
+	for _, c := range out {
+		t.Logf("  [%d] @%d  %q", c.Idx, c.ByteOffset, c.Title)
+	}
+	// Raw-parse only catches markers that already stand on their own
+	// line (~210 of 217 in this book). The remaining ~7 are glued to
+	// the prior paragraph and only get split out by FormatText —
+	// asserted end-to-end in TestFormatToCache_ShiJingDuan below.
+	if len(out) < 200 {
+		t.Fatalf("expected at least 200 bracketed chapters, got %d", len(out))
+	}
+	if out[0].Title != "「一」" {
+		t.Fatalf("expected first chapter title to be 「一」, got %q", out[0].Title)
 	}
 }
 

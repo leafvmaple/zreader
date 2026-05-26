@@ -281,6 +281,56 @@ func TestRestoreBackups(t *testing.T) {
 // Smoke test against the real 照日天劫 — full FormatToCache flow in a
 // temp copy. The cached file should be parseable and yield the full
 // post-format chapter set.
+// 《十景缎》end-to-end: every `「N」` marker should make it out, including
+// the 7 that are glued mid-paragraph in the source (some after `…` /
+// `"`, some with no preceding punctuation at all).
+func TestFormatToCache_ShiJingDuan(t *testing.T) {
+	const src = "../../../books/十景缎 - 佚名.txt"
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Skipf("test book not present: %v", err)
+	}
+
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "十景缎 - 佚名.txt")
+	if err := os.WriteFile(dst, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cp, title, author, err := FormatToCache(tmp, dst)
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if title != "十景缎" || author != "佚名" {
+		t.Errorf("meta = (%q, %q), want (十景缎, 佚名)", title, author)
+	}
+
+	formatted, err := os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, text, err := DetectAndDecode(formatted)
+	if err != nil {
+		t.Fatalf("decode formatted: %v", err)
+	}
+	chapters := ParseChapters(text, nil)
+	if len(chapters) < 217 {
+		t.Errorf("post-format chapters = %d, want >= 217", len(chapters))
+	}
+	for _, want := range []string{"「九十六」", "「一百零五」", "「一百二十四」", "「一百二十六」", "「一百八十四」", "「一百八十九」", "「一百九十九」"} {
+		found := false
+		for _, c := range chapters {
+			if c.Title == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("inline-glued chapter %q missing after format", want)
+		}
+	}
+}
+
 func TestFormatToCache_ZhaoRiTianJie(t *testing.T) {
 	const src = "../../../books/照日天劫 - 佚名.txt"
 	raw, err := os.ReadFile(src)

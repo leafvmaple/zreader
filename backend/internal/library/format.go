@@ -151,12 +151,18 @@ func RestoreBackups(folder string) (int, error) {
 }
 
 // chapterSplitPattern matches structured chapter markers that — when found
-// inside a wrapped paragraph after a sentence- or quote-ending punctuation
-// — should be promoted to their own paragraph. The vocabulary intentionally
-// mirrors ChapterPattern in txt.go: format normalises every case the
-// parser would otherwise have to special-case sub-line.
+// inside a wrapped paragraph — should be promoted to their own paragraph.
+// The structured / English arms (`第X章`, `Chapter N`) are gated by
+// chapterSplitPrecedes (they can appear in body text like `翻到第三章`).
+// The bracketed-numeral arm (`「一」`, `【3】`, …) is split unconditionally
+// — the bracket pair around a numeral is syntactically unambiguous, and
+// real-world TXTs (《十景缎》) occasionally glue the marker to the
+// previous paragraph without any terminal punctuation. The vocabulary
+// mirrors ChapterPattern / BracketedNumeralPattern in txt.go.
 var chapterSplitPattern = regexp.MustCompile(
-	`第\s*[\d零一二三四五六七八九十百千万0-9]+\s*[章节回卷篇集部折]|Chapter\s+\d+|CHAPTER\s+\d+`,
+	`第\s*[\d零一二三四五六七八九十百千万0-9]+\s*[章节回卷篇集部折]` +
+		`|Chapter\s+\d+|CHAPTER\s+\d+` +
+		`|[「『【〈\[]\s*[零〇一二三四五六七八九十百千万0-9]+\s*[」』】〉\]]`,
 )
 
 // chapterTitleSpacingPattern normalises the whitespace between a Chinese
@@ -189,6 +195,7 @@ var chapterTitleSpacingPattern = regexp.MustCompile(
 //     is a known limitation of structure-without-semantics matching.
 var titleBodySplitPattern = regexp.MustCompile(
 	`^[\s\p{Zs}]*` +
+		`(?:` +
 		`第\s*[\d零一二三四五六七八九十百千万0-9]+\s*[章节回卷篇集部折]` +
 		`[\s\p{Zs}]*` +
 		`(?:` +
@@ -196,16 +203,21 @@ var titleBodySplitPattern = regexp.MustCompile(
 		`|[\p{Han}]{5}，[\p{Han}]{5}` +
 		`|[\p{Han}]{3}，[\p{Han}]{3}` +
 		`)` +
-		`(?:（[^）\r\n]{1,6}）)?`,
+		`(?:（[^）\r\n]{1,6}）)?` +
+		`|[「『【〈\[]\s*[零〇一二三四五六七八九十百千万0-9]+\s*[」』】〉\]]` +
+		`)`,
 )
 
 // chapterSplitPrecedes is the set of characters that, when immediately
 // before a chapter marker, signal the marker actually starts a new
 // chapter rather than appearing as body text. End-of-quote / end-of-
-// sentence in CJK + ASCII.
+// sentence in CJK + ASCII. Only consulted for the gated arms of
+// chapterSplitPattern (structured `第X章`, `Chapter N`); bracketed
+// numerals always split.
 var chapterSplitPrecedes = map[rune]struct{}{
 	'」': {}, '』': {}, '）': {}, ')': {},
 	'。': {}, '！': {}, '？': {}, '.': {}, '!': {}, '?': {},
+	'…': {}, '”': {}, '’': {},
 }
 
 // FormatText returns text normalised for downstream chapter parsing:
@@ -271,10 +283,13 @@ func splitTitleFromBody(paragraph string) []string {
 	return []string{paragraph[:loc[1]], paragraph[loc[1]:]}
 }
 
-// splitAtChapters splits a joined paragraph at every structured chapter
-// marker preceded by sentence- or quote-ending punctuation. Markers at
-// or before `prev` (already inside a cut piece) and markers preceded by
-// ordinary characters (e.g. "翻到第三章" — body mention) are left alone.
+// splitAtChapters splits a joined paragraph at every chapter marker.
+// Structured `第X章` / `Chapter N` markers are only split when preceded
+// by sentence- or quote-ending punctuation (the bare form can appear in
+// body text like "翻到第三章"). Bracketed-numeral markers (`「一」`,
+// `【3】`) are always split — the bracket+numeral pair is unambiguous
+// and some sources glue the marker straight to body text with no
+// terminal punctuation (《十景缎》case).
 func splitAtChapters(paragraph string) []string {
 	indices := chapterSplitPattern.FindAllStringIndex(paragraph, -1)
 	if len(indices) == 0 {
@@ -286,7 +301,7 @@ func splitAtChapters(paragraph string) []string {
 		if m[0] <= prev {
 			continue
 		}
-		if !precededBySentenceEnd(paragraph, m[0]) {
+		if !isBracketedNumeralStart(paragraph, m[0]) && !precededBySentenceEnd(paragraph, m[0]) {
 			continue
 		}
 		pieces = append(pieces, paragraph[prev:m[0]])
@@ -303,6 +318,15 @@ func precededBySentenceEnd(s string, pos int) bool {
 	r, _ := utf8.DecodeLastRuneInString(s[:pos])
 	_, ok := chapterSplitPrecedes[r]
 	return ok
+}
+
+func isBracketedNumeralStart(s string, pos int) bool {
+	r, _ := utf8.DecodeRuneInString(s[pos:])
+	switch r {
+	case '「', '『', '【', '〈', '[':
+		return true
+	}
+	return false
 }
 
 // --- helpers shared with FormatText (used to be in txt.go) ---

@@ -33,3 +33,19 @@ for now.
   title boundary — heavy dep for one case.
 - Manual `<filename>.chapters.json` override file in `books/` for any
   book where automatic split is wrong.
+
+## Source — 《十景缎》 has 4 missing chapter numbers
+
+`books/十景缎 - 佚名.txt`
+
+The source file is numbered `「一」`..`「二百二十一」` but is missing
+markers for chapters **50, 103, 135, 180** — the sequence jumps
+directly from 49→51, 102→104, 134→136, 179→181. Surrounding prose
+flows continuously across each gap, so this is almost certainly a
+typo/transcription error in the source rather than missing content.
+
+Net result: 217 detectable chapters out of a nominal 221. The parser
+is doing all it can — fixing this requires either a cleaner copy of
+the source or a manual `<filename>.chapters.json` override
+(cross-referenced with the "asymmetric subtitle" entry above as a
+candidate use case for the same mechanism).

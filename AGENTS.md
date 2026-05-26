@@ -112,7 +112,7 @@ then on the source is pristine and the cached file under
 
 ## Chapter detection — tiered
 
-`ParseChapters` runs three line-anchored patterns and merges:
+`ParseChapters` runs four line-anchored patterns and merges:
 
 1. **`ChapterPattern`** — structured `第X章/折/…` + `Chapter N`. Capture
    group 1 is the title; subtitle arm prefers a parenthesised part
@@ -121,7 +121,12 @@ then on the source is pristine and the cached file under
 2. **`NamedChapterPattern`** — `楔子/序章/序言/序篇/引子/前言/尾声/后记/
    番外/终章/结语`. Line-anchored with a small slop; these words appear
    in body text so we don't accept them inline.
-3. **`LooseDigitPattern`** — bare numeric divider lines (`1`, `12`).
+3. **`BracketedNumeralPattern`** — `「一」/【3】/〈12〉/[二十]` style.
+   Whole-line bracketed numeral (CJK or Arabic). Bracket set restricted
+   to `「『【〈[` / `」』】〉]` — `《》` / `（）` / `()` excluded
+   (book-title / inline use, too noisy). Treated as primary tier — the
+   bracket pairing is a strong signal on its own, so no threshold gate.
+4. **`LooseDigitPattern`** — bare numeric divider lines (`1`, `12`).
    Merged in only when the primary tiers are sparse (< 3 matches);
    stray numeric lines in body text would false-positive otherwise.
 
@@ -136,8 +141,8 @@ overrides the filename-derived title when present.
 
 ## Test corpus
 
-Two real books in `books/` (gitignored — won't be in fresh clones, the
-tests `t.Skipf` when absent):
+Three real books in `books/` (gitignored — won't be in fresh clones,
+the tests `t.Skipf` when absent):
 
 - **《铸蝉记》** — well-formatted: every paragraph is one line, blank
   lines between, chapter dividers are `楔子` then bare digits `1`..`10`.
@@ -147,6 +152,9 @@ tests `t.Skipf` when absent):
   after `」` / `）` / `。`, plus `（上）（中）（下）（补）` multi-part
   markers. Exercises `FormatText`'s wrap-rejoin + chapter-split, then
   line-anchored detection on the formatted output.
+- **《十景缎》** — bracketed-numeral chapter markers `「一」`..`「二百
+  二十一」` on their own lines. Exercises `BracketedNumeralPattern` and
+  the regex's CJK compound-number coverage (零/百/十/individuals).
 
 When a TXT defeats detection, the first thing to do is `git diff` the
 formatted output vs the original — usually a format-side fix, not a
