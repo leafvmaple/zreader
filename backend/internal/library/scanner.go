@@ -120,15 +120,20 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, path string, s
 	}
 
 	chapters := ParseChapters(text, nil)
+	meta := DetectMetadata(text)
 
 	hash := headHash(raw)
 
-	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	title := meta.Title
+	if title == "" {
+		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
 
 	book := store.Book{
 		FolderID:     folderID,
 		Path:         path,
 		Title:        title,
+		Author:       sql.NullString{String: meta.Author, Valid: meta.Author != ""},
 		Format:       "txt",
 		Encoding:     sql.NullString{String: encName, Valid: encName != ""},
 		SizeBytes:    st.Size(),
