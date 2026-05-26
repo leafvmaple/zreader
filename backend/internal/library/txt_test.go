@@ -101,33 +101,8 @@ func TestParseChapters_ZhuChanJi(t *testing.T) {
 	}
 }
 
-// 照日天劫 uses "第X折" markers, often glued to body text (sometimes mid-line
-// after a closing quote/paren). Exercises InlineChapterPattern.
-func TestParseChapters_ZhaoRiTianJie(t *testing.T) {
-	const path = "../../../books/照日天劫 - 佚名.txt"
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Skipf("test book not present: %v", err)
-	}
-	_, text, err := DetectAndDecode(raw)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	out := ParseChapters(text, nil)
-	t.Logf("got %d chapters", len(out))
-	for _, c := range out {
-		t.Logf("  [%d] @%d  %q", c.Idx, c.ByteOffset, c.Title)
-	}
-	// File has 12 main 折 chapters; several are split into (上)(中)(下) so
-	// the realistic count is >12. Require at least 12 unique markers found.
-	if len(out) < 12 {
-		t.Fatalf("expected >=12 chapters, got %d", len(out))
-	}
-	// First three should be 第一折/第二折/第三折 in order.
-	wantPrefix := []string{"第一折", "第二折", "第三折"}
-	for i, want := range wantPrefix {
-		if !strings.HasPrefix(out[i].Title, want) {
-			t.Errorf("chapter %d title %q does not start with %q", i+1, out[i].Title, want)
-		}
-	}
-}
+// 照日天劫's post-format chapter coverage is asserted in
+// TestFormatBook_ZhaoRiTianJie — that's the path the scanner actually
+// takes. ParseChapters is a pure function operating on already-formatted
+// input; testing it directly on raw 照日天劫 would just re-test the
+// missing-format case.
