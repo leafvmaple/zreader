@@ -247,29 +247,84 @@ type Chapter struct {
 	ByteOffset int
 }
 
+// chapterRule is one row in the marker-hierarchy registry. Rank fixes
+// the rule's place in the hierarchy — smaller = outer, larger =
+// leaf-ward. The pattern's first capture group is the chapter title.
+//
+// Strict marks rules whose word-shape is distinctive enough to trust
+// every match (部 / 卷 / 第X章 / 楔子 / bracketed numerals — all hard
+// to confuse with body content). Non-strict rules use shapes that
+// occur incidentally in prose ("六、" appears in inline enumeration,
+// bare digits show up in dates / page numbers) — they're only kept
+// when their count actually outnumbers the strict matches at the
+// same rank, otherwise they're treated as noise.
+//
+// Several rules can share a rank when the same tier admits multiple
+// shapes (the chapter tier covers `第X章`, `楔子`, bracketed numerals,
+// enumerated, …).
+type chapterRule struct {
+	name    string
+	rank    int
+	pattern *regexp.Regexp
+	strict  bool
+}
+
+// chapterRules is the registry of marker tiers in rank order. Adding
+// a new tier — say `第X篇` between 卷 and 章 — is a one-line insert
+// here plus bumping the deeper rules' ranks. The parsing, merging,
+// depth computation, tree building and EPUB serialisation downstream
+// all derive their behaviour from this table — no constant lookups,
+// no per-tier branching elsewhere in the codebase.
+//
+// To support, e.g., 5-level books with `部 / 篇 / 卷 / 章 / 节`:
+// declare each marker's regex, insert into this slice at the right
+// rank, set strict as appropriate, and you're done.
+var chapterRules = []chapterRule{
+	{name: "part", rank: 0, pattern: PartPattern, strict: true},
+	{name: "volume", rank: 1, pattern: VolumePattern, strict: true},
+	{name: "chapter", rank: 2, pattern: ChapterPattern, strict: true},
+	{name: "named", rank: 2, pattern: NamedChapterPattern, strict: true},
+	{name: "bracketed", rank: 2, pattern: BracketedNumeralPattern, strict: true},
+	{name: "enumerated", rank: 2, pattern: EnumeratedNumeralPattern, strict: false},
+}
+
+// chapterLeafRank is the rank of the deepest tier in chapterRules.
+// The loose-digit fallback uses this rank, and the "is the chapter
+// tier dense enough?" gate counts entries at this rank.
+var chapterLeafRank = func() int {
+	r := 0
+	for _, rule := range chapterRules {
+		if rule.rank > r {
+			r = rule.rank
+		}
+	}
+	return r
+}()
+
 // ParseChapters scans `text` (decoded UTF-8, normalised by FormatText
 // via the scanner's format step) for chapter headers.
 //
-// When `re` is non-nil the caller's regex is the only matcher used and
-// every match is emitted at level=0 (the caller is treating the regex
-// as a single-tier matcher; multi-tier detection would need separate
-// passes and isn't supported through this hook).
+// When `re` is non-nil the caller's regex is the sole matcher and
+// every match is emitted at Level=0 — the caller is treating the
+// regex as a single-tier matcher with no hierarchy.
 //
-// When `re` is nil we apply a tiered strategy:
-//  1. PartPattern — `第X部` headers (tier 0, outermost grouping).
-//  2. VolumePattern — `第X卷` / `卷X` headers (tier 1).
-//  3. ChapterPattern ∪ NamedChapterPattern ∪ BracketedNumeralPattern ∪
-//     EnumeratedNumeralPattern — structured + named + bracketed CJK
-//     numerals + `<numeral>、<subtitle>` enumeration (tier 2, leaf).
-//  4. If the chapter tier is sparse, also merge in LooseDigitPattern
-//     — for books that use bare numeric dividers like "1", "2".
-//  5. Synthetic "正文" if nothing matches.
+// When `re` is nil the matcher runs in two phases:
 //
-// Tiers are then renumbered to 0-indexed TOC depth via normaliseLevels:
-// a book that uses only the chapter tier gets all entries at Level=0;
-// a 卷+章 book gets 卷=0 / 章=1; a 部+卷+章 book gets 部=0 / 卷=1 / 章=2.
-// Downstream code (BuildEpub's tree builder, frontend TOC) treats Level
-// as nesting depth without needing to know which markers were involved.
+//	Phase 1 — Survey: scan every rule, collect matches and per-rank
+//	          strict-match counts. We don't yet know what the book's
+//	          chapter convention is.
+//
+//	Phase 2 — Select & merge: keep every strict rule's matches; keep a
+//	          non-strict rule only if it outnumbers the strict matches
+//	          at its rank (otherwise it's pattern noise leaking from
+//	          body prose). Merge the kept lists by offset, rewrite
+//	          Level to tree-position depth via assignDepth.
+//
+// If the chapter tier still ends up sparse, the loose-digit fallback
+// fills in; if nothing matched at all, a synthetic "正文" stands
+// alone. Downstream (BuildEpub, frontend TOC) treats Level as
+// 0-indexed nesting depth without needing to know which markers
+// produced it.
 func ParseChapters(text string, re *regexp.Regexp) []Chapter {
 	if re != nil {
 		out := scanLineAnchored(text, re, 0)
@@ -279,69 +334,72 @@ func ParseChapters(text string, re *regexp.Regexp) []Chapter {
 		return out
 	}
 
-	parts := scanLineAnchored(text, PartPattern, tierPart)
-	volumes := scanLineAnchored(text, VolumePattern, tierVolume)
-	chapters := mergeChapters(
-		scanLineAnchored(text, ChapterPattern, tierChapter),
-		scanLineAnchored(text, NamedChapterPattern, tierChapter),
-		scanLineAnchored(text, BracketedNumeralPattern, tierChapter),
-		scanLineAnchored(text, EnumeratedNumeralPattern, tierChapter),
-	)
-	primary := mergeChapters(parts, volumes, chapters)
-
-	if len(chapters) >= minPrimaryForNoFallback {
-		return normaliseLevels(primary)
+	// Phase 1: scan every rule, count strict matches per rank.
+	matches := make([][]Chapter, len(chapterRules))
+	strictAtRank := map[int]int{}
+	for i, r := range chapterRules {
+		matches[i] = scanLineAnchored(text, r.pattern, r.rank)
+		if r.strict {
+			strictAtRank[r.rank] += len(matches[i])
+		}
 	}
 
-	loose := scanLineAnchored(text, LooseDigitPattern, tierChapter)
+	// Phase 2: select rules whose matches we trust, then merge.
+	lists := make([][]Chapter, 0, len(chapterRules))
+	leafCount := 0
+	for i, r := range chapterRules {
+		list := matches[i]
+		if !r.strict && len(list) <= strictAtRank[r.rank] {
+			// Non-strict rule didn't outnumber strict matches at its
+			// rank — treat as noise (e.g. `六、` enumeration inside a
+			// book that uses `第X章` as its real divider).
+			continue
+		}
+		lists = append(lists, list)
+		if r.rank == chapterLeafRank {
+			leafCount += len(list)
+		}
+	}
+	primary := mergeChapters(lists...)
+
+	if leafCount >= minPrimaryForNoFallback {
+		return assignDepth(primary)
+	}
+	loose := scanLineAnchored(text, LooseDigitPattern, chapterLeafRank)
 	if len(loose) >= minLooseForFallback {
-		return normaliseLevels(mergeChapters(primary, loose))
+		return assignDepth(mergeChapters(primary, loose))
 	}
-
 	if len(primary) > 0 {
-		return normaliseLevels(primary)
+		return assignDepth(primary)
 	}
 	return syntheticChapter()
 }
 
-// Raw scan tiers. Higher = deeper / more leaf-like. Final TOC Level is
-// derived by normaliseLevels — these values are only used internally
-// during merge to keep parts above volumes above chapters when offsets
-// collide.
-const (
-	tierPart    = 0
-	tierVolume  = 1
-	tierChapter = 2
-)
-
-// normaliseLevels rewrites raw tier values into 0-indexed TOC depth.
-// Each entry carries its scan-time tier; the final Level is its rank
-// in the set of tiers actually present in this book. The convention:
+// assignDepth walks an offset-sorted chapter list (whose Level field
+// initially carries each entry's marker rank from chapterRules) and
+// rewrites Level to the entry's depth in the implicit tree that a
+// stack-based builder would produce: 0 for entries with no smaller-
+// rank ancestor still open, otherwise parent_depth + 1.
 //
-//	flat chapter book (only tierChapter)            → all Level=0
-//	卷+章 book (tierVolume + tierChapter)           → 卷 Level=0, 章 Level=1
-//	部+卷+章 book (all three tiers)                 → 部 Level=0, 卷 Level=1, 章 Level=2
+// Missing tiers collapse naturally — a 部+章 book (ranks 0, 2) emits
+// depths 0, 1 with no empty depth-slot for the absent volume tier.
+// Stray leaf-rank entries that appear before any container (the
+// `楔子` opening before `第一部` in classical wuxia layouts) emit at
+// depth 0 because their stack is empty — matching the visual position
+// the EPUB nav will place them at.
 //
-// Books that mix tiers unevenly (e.g. parts + chapters but no volumes)
-// likewise collapse to consecutive levels — present tiers always rank
-// 0, 1, 2… so the TOC never has empty "depth holes".
-func normaliseLevels(chapters []Chapter) []Chapter {
-	present := map[int]bool{}
-	for _, c := range chapters {
-		present[c.Level] = true
-	}
-	tiers := make([]int, 0, len(present))
-	for t := range present {
-		tiers = append(tiers, t)
-	}
-	sort.Ints(tiers)
-	rank := make(map[int]int, len(tiers))
-	for i, t := range tiers {
-		rank[t] = i
-	}
+// This is the only pass that maintains Level state; the rest of the
+// pipeline reads Level as a depth value without rewriting it.
+func assignDepth(chapters []Chapter) []Chapter {
+	stack := make([]int, 0, 4) // open ancestor ranks
 	out := make([]Chapter, len(chapters))
 	for i, c := range chapters {
-		c.Level = rank[c.Level]
+		for len(stack) > 0 && stack[len(stack)-1] >= c.Level {
+			stack = stack[:len(stack)-1]
+		}
+		depth := len(stack)
+		stack = append(stack, c.Level)
+		c.Level = depth
 		out[i] = c
 	}
 	return out

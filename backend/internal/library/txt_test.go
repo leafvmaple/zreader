@@ -173,10 +173,11 @@ func TestParseChapters_VolumesWithChapters(t *testing.T) {
 func TestParseChapters_ChaptersBeforeFirstVolume(t *testing.T) {
 	// Some books begin with chapters because the author hadn't
 	// introduced volumes yet; the first explicit 卷 marker appears
-	// only part way through the book.
-	// Parser must emit chapters in document order — the missing 第一卷
-	// is a frontend rendering concern, not a parser concern. We assert
-	// no synthetic level=0 leak from the parser.
+	// only part way through the book. Parser emits chapters in
+	// document order; assignDepth gives each entry its tree-position
+	// depth, so pre-volume chapters (no ancestor in scope) are roots
+	// at depth 0 — same outer level as the volume that follows them.
+	// The post-volume chapter is the only one nested under the volume.
 	text := "第一章　甲乙丙丁\n正文。\n\n" +
 		"第二章　子丑寅卯\n正文。\n\n" +
 		"第二卷　戊己庚辛\n\n" +
@@ -185,14 +186,53 @@ func TestParseChapters_ChaptersBeforeFirstVolume(t *testing.T) {
 	if len(out) != 4 {
 		t.Fatalf("want 4, got %d: %+v", len(out), out)
 	}
-	if out[0].Level != 1 || out[1].Level != 1 {
-		t.Errorf("pre-volume chapters should be level=1; got %+v, %+v", out[0], out[1])
+	wantLevels := []int{0, 0, 0, 1}
+	for i, want := range wantLevels {
+		if out[i].Level != want {
+			t.Errorf("entry %d (%q): level=%d, want %d", i, out[i].Title, out[i].Level, want)
+		}
 	}
-	if out[2].Level != 0 {
-		t.Errorf("volume marker should be level=0; got %+v", out[2])
+}
+
+func TestParseChapters_StrictBeatsEnumeratedNoise(t *testing.T) {
+	// Mixed shape: structured `第X章` dominates as the real chapter
+	// marker; a stray `六、子曰` on its own line in the body must not
+	// leak into the TOC. The two-phase scan should count strict
+	// matches at the chapter rank (3 from ChapterPattern) and drop
+	// non-strict EnumeratedNumeralPattern matches (which would
+	// otherwise emit `六、子曰` as a fourth "chapter").
+	text := "第一章　甲乙丙丁\n　　正文一段。\n\n" +
+		"第二章　子丑寅卯\n　　正文二段。\n\n" +
+		"六、子曰\n　　这是一段引用孔子的正文，因为整行匹配的关系，被 EnumeratedNumeralPattern 抓住，但其实是书中引文。\n\n" +
+		"第三章　申酉戌亥\n　　正文三段。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 3 {
+		t.Fatalf("want 3 (enumerated `六、` filtered out), got %d: %+v", len(out), out)
 	}
-	if out[3].Level != 1 {
-		t.Errorf("post-volume chapter should be level=1; got %+v", out[3])
+	for _, c := range out {
+		if strings.HasPrefix(c.Title, "六、") {
+			t.Errorf("permissive `六、` leaked through despite 3 strict chapter matches: %+v", c)
+		}
+	}
+}
+
+func TestParseChapters_EnumeratedAloneWins(t *testing.T) {
+	// Pure enumerated book: no strict matches at the chapter rank,
+	// so EnumeratedNumeralPattern (non-strict) is the only signal.
+	// It must still be emitted — the strict-vs-permissive rule only
+	// kicks in when strict matches exist to compete with.
+	text := "一、起头\n　　正文。\n\n" +
+		"二、中段\n　　正文。\n\n" +
+		"三、结尾\n　　正文。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 3 {
+		t.Fatalf("want 3, got %d: %+v", len(out), out)
+	}
+	wantTitles := []string{"一、起头", "二、中段", "三、结尾"}
+	for i, c := range out {
+		if c.Title != wantTitles[i] {
+			t.Errorf("idx %d: title=%q, want %q", i, c.Title, wantTitles[i])
+		}
 	}
 }
 
