@@ -56,6 +56,12 @@ backend/internal/library/testdata/corpus.json
 # Stray API-response dumps from manual curl debugging.
 .tmp_*.json
 
+# Local-only build overlays — see Dockerfile.cn / docker-compose.override.yml
+# headers. Contain CN-mirror routing tweaks that should not ship to other
+# contributors.
+Dockerfile.cn
+docker-compose.override.yml
+
 # Frontend uses pnpm; npm's lockfile only shows up if someone runs
 # `npm install` by accident — never commit it.
 frontend/package-lock.json
