@@ -93,10 +93,6 @@ function chapterIdxAtOffset(offset: number, chapters: Chapter[]): number {
   return idx;
 }
 
-// renderChapter splits a chapter's formatted text into a title heading
-// plus paragraph nodes. The backend's format pass emits chapters as
-// `<title>\n\n<para>\n\n<para>…`, so the first paragraph (split on blank
-// lines, trimmed) is the title.
 // groupTOC walks the flat chapter list and emits sections grouped by
 // volume. A volume header (level=0) starts a new section; chapters
 // (level=1) attach to the most recent section. If the first entries are
@@ -170,14 +166,25 @@ function TOCList({
   );
 }
 
+// renderChapter splits a chapter's formatted text into a title heading
+// plus paragraph nodes. For any chapter ParseChapters extracted from a
+// real header the formatter emits the title as its own paragraph at the
+// chapter offset, so paragraphs[0] == metaTitle and we peel it. The
+// synthetic "正文" entry (created when no headers were detected) lives
+// in metadata only — the cached text starts straight with body prose,
+// so paragraphs[0] is the first sentence; peeling it would render that
+// sentence as an h2 (the "bolded first line" bug). When the leading
+// paragraph doesn't match metaTitle, use the metadata title for the
+// heading and keep every paragraph as body.
 function renderChapter(
   idx: number,
   text: string,
-  fallbackTitle: string,
+  metaTitle: string,
 ): React.ReactNode {
   const paragraphs = text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
-  const titleText = paragraphs[0] ?? fallbackTitle;
-  const bodyParas = paragraphs.slice(1);
+  const hasTitleLine = paragraphs.length > 0 && paragraphs[0] === metaTitle;
+  const titleText = hasTitleLine ? paragraphs[0] : metaTitle || paragraphs[0] || '';
+  const bodyParas = hasTitleLine ? paragraphs.slice(1) : paragraphs;
   return (
     <Fragment key={idx}>
       <h2 id={`chap-${idx}`} className="reader__chapter">
