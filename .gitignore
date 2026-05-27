@@ -48,6 +48,11 @@ backend/internal/webui/dist/*
 # Local sandbox for end-to-end backend tests
 .testdata/
 
+# Private corpus config for TestFormatToCache_Corpus — references real
+# book paths/titles and stays out of the repo. corpus.example.json
+# (the schema template) is committed.
+backend/internal/library/testdata/corpus.json
+
 # Stray API-response dumps from manual curl debugging.
 .tmp_*.json
 

@@ -50,17 +50,17 @@ var LooseDigitPattern = regexp.MustCompile(
 
 // BracketedNumeralPattern matches a line that is *only* a bracketed
 // numeral — e.g. "「一」", "【3】", "〈12〉", "[二十]". Common in older
-// martial-arts / wuxia TXTs (《十景缎》is the canonical example in our
-// corpus). Brackets restricted to set unlikely to start a dialog line
-// with a single-numeral payload (《》 omitted — used for book titles;
-// （） / () omitted — too common inline).
+// martial-arts / wuxia TXTs. Brackets restricted to a set unlikely to
+// start a dialog line with a single-numeral payload (《》 omitted —
+// used for book titles; （） / () omitted — too common inline).
 var BracketedNumeralPattern = regexp.MustCompile(
 	`^[\s\p{Zs}]*[「『【〈\[]\s*[零〇一二三四五六七八九十百千万0-9]+\s*[」』】〉\]]\s*$`,
 )
 
 // AuthorByPattern matches an inline "by: NAME" / "By：NAME" tag commonly
-// embedded near the top of web-novel TXTs (e.g. "铸蝉记 by:轩辕悬"). Both
-// ASCII and full-width colons are accepted. Case-insensitive on "by".
+// embedded near the top of web-novel TXTs (e.g. `<title> by:<author>`).
+// Both ASCII and full-width colons are accepted. Case-insensitive on
+// "by".
 //
 // Group 1 captures the in-file title prefix (often empty when the line
 // is just "by: NAME"); group 2 captures the author name.

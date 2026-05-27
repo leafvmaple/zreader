@@ -1,6 +1,7 @@
 package library
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +124,9 @@ func TestFormatText_DropsMetadataHeader(t *testing.T) {
 }
 
 func TestFormatText_TitleSplitsFromBody(t *testing.T) {
+	// Subtitles use synthetic 4-char chunks drawn from 天干 / 地支 /
+	// 四季 — keeps the 4+4 structural shape the splitter checks for
+	// without embedding any real corpus chapter titles.
 	cases := []struct {
 		name string
 		in   string
@@ -130,42 +134,46 @@ func TestFormatText_TitleSplitsFromBody(t *testing.T) {
 	}{
 		{
 			name: "4+4 subtitle glued to body",
-			in:   "　　第一折　七禽六兽，十三衣冠锦幄犹温，兽香袅袅，黄花梨木精雕的大床。\n",
-			want: "第一折　七禽六兽，十三衣冠\n\n锦幄犹温，兽香袅袅，黄花梨木精雕的大床。\n",
+			in:   "　　第一章　甲乙丙丁，戊己庚辛这是一段被错误拼接到标题后的正文内容。\n",
+			want: "第一章　甲乙丙丁，戊己庚辛\n\n这是一段被错误拼接到标题后的正文内容。\n",
 		},
 		{
 			name: "4+4 + (上) part marker glued to body",
-			in:   "　　第九折　升仙大道，紫电冲霄（上）劫兆醒过来。\n",
-			want: "第九折　升仙大道，紫电冲霄（上）\n\n劫兆醒过来。\n",
+			in:   "　　第九章　子丑寅卯，辰巳午未（上）主角醒了过来。\n",
+			want: "第九章　子丑寅卯，辰巳午未（上）\n\n主角醒了过来。\n",
 		},
 		{
 			name: "no space between marker and 4+4 subtitle — space inserted",
-			in:   "　　第五折云梦之身，幻影剑式劫兆与岳盈盈行出大院。\n",
-			want: "第五折　云梦之身，幻影剑式\n\n劫兆与岳盈盈行出大院。\n",
+			in:   "　　第五章东南西北，春夏秋冬主角走出院落。\n",
+			want: "第五章　东南西北，春夏秋冬\n\n主角走出院落。\n",
 		},
 		{
 			name: "multiple spaces between marker and subtitle — collapsed to one",
-			in:   "　　第七折　　　道圣智绝，无用相思丹墀之上。\n",
-			want: "第七折　道圣智绝，无用相思\n\n丹墀之上。\n",
+			in:   "　　第七章　　　风花雪月，松竹梅兰高台之上。\n",
+			want: "第七章　风花雪月，松竹梅兰\n\n高台之上。\n",
 		},
 		{
 			name: "marker with part marker directly attached — no space inserted",
-			in:   "　　第九折（上）\n",
-			want: "第九折（上）\n",
+			in:   "　　第九章（上）\n",
+			want: "第九章（上）\n",
 		},
 		{
 			name: "chapter title with no body glued — unchanged",
-			in:   "　　第九折　升仙大道，紫电冲霄（上）\n",
-			want: "第九折　升仙大道，紫电冲霄（上）\n",
+			in:   "　　第九章　子丑寅卯，辰巳午未（上）\n",
+			want: "第九章　子丑寅卯，辰巳午未（上）\n",
 		},
 		{
 			// Documents a known limitation: a true 4+3 subtitle gets
 			// over-split as 4+4, stealing one char from the body. See
 			// TODO.md — fixing this needs semantic context (or per-book
 			// override) that the structural matcher doesn't have.
+			//
+			// Synthetic 4+3 input:    `甲乙丙丁，戊己庚` followed by
+			//                         body that starts with `辛`.
+			// Greedy 4+4 takes:       `甲乙丙丁，戊己庚辛` (steals `辛`).
 			name: "asymmetric 4+3 subtitle — over-splits as 4+4 (known)",
-			in:   "　　第六折连天铁障，将军箓法文、商二姝相偕入观。\n",
-			want: "第六折　连天铁障，将军箓法\n\n文、商二姝相偕入观。\n",
+			in:   "　　第六章甲乙丙丁，戊己庚辛壬癸子丑寅卯辰。\n",
+			want: "第六章　甲乙丙丁，戊己庚辛\n\n壬癸子丑寅卯辰。\n",
 		},
 	}
 	for _, tc := range cases {
@@ -182,8 +190,9 @@ func TestParseFilenameMeta(t *testing.T) {
 	cases := []struct {
 		in, wantTitle, wantAuthor string
 	}{
-		{"照日天劫 - 佚名.txt", "照日天劫", "佚名"},
-		{"铸蝉记 - 轩辕悬.TXT", "铸蝉记", "轩辕悬"},
+		{"BookA - AuthorX.txt", "BookA", "AuthorX"},
+		{"BookB - AuthorY.TXT", "BookB", "AuthorY"},
+		{"汉字标题 - 汉字作者.txt", "汉字标题", "汉字作者"},
 		{"no-separator.txt", "no-separator", ""},
 		{"  spaced - author  .txt", "spaced", "author"},
 		// Title contains " - " — the LAST separator splits.
@@ -209,17 +218,17 @@ func TestResolveMetadata(t *testing.T) {
 		wantAuthor string
 	}{
 		{"by-line wins over filename",
-			"照日天劫 - 佚名.txt", TxtMetadata{Title: "铸蝉记", Author: "轩辕悬"},
-			"铸蝉记", "轩辕悬"},
+			"FileTitle - FileAuthor.txt", TxtMetadata{Title: "ByTitle", Author: "ByAuthor"},
+			"ByTitle", "ByAuthor"},
 		{"filename used when by-line empty",
-			"照日天劫 - 佚名.txt", TxtMetadata{},
-			"照日天劫", "佚名"},
+			"FileTitle - FileAuthor.txt", TxtMetadata{},
+			"FileTitle", "FileAuthor"},
 		{"default author when both empty",
 			"no-author.txt", TxtMetadata{},
 			"no-author", DefaultAuthor},
 		{"partial by-line — title only, author from filename",
-			"照日天劫 - 佚名.txt", TxtMetadata{Title: "新名字"},
-			"新名字", "佚名"},
+			"FileTitle - FileAuthor.txt", TxtMetadata{Title: "NewTitle"},
+			"NewTitle", "FileAuthor"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -235,7 +244,7 @@ func TestResolveMetadata(t *testing.T) {
 func TestSanitizePathComponent(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"normal", "normal"},
-		{"轩辕悬", "轩辕悬"},
+		{"汉字测试", "汉字测试"},
 		{"with/slash", "with_slash"},
 		{"a:b*c?d", "a_b_c_d"},
 		{"  trimmed  ", "trimmed"},
@@ -252,8 +261,9 @@ func TestSanitizePathComponent(t *testing.T) {
 
 func TestFormatToCache_LeavesSourceUntouched(t *testing.T) {
 	tmp := t.TempDir()
-	src := filepath.Join(tmp, "照日天劫 - 佚名.txt")
-	original := "　　第一折　七禽六兽，十三衣冠锦幄犹温，兽香袅袅，大床。\n\n　　第二段。\n"
+	const wantTitle, wantAuthor = "BookSample", "AuthorSample"
+	src := filepath.Join(tmp, wantTitle+" - "+wantAuthor+".txt")
+	original := "　　第一章　甲乙丙丁，戊己庚辛这是一段被错误拼接到标题后的正文内容。\n\n　　第二段正文示例。\n"
 	if err := os.WriteFile(src, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -264,10 +274,10 @@ func TestFormatToCache_LeavesSourceUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != "照日天劫" || author != "佚名" {
-		t.Errorf("meta = (%q, %q), want (照日天劫, 佚名)", title, author)
+	if title != wantTitle || author != wantAuthor {
+		t.Errorf("meta = (%q, %q), want (%q, %q)", title, author, wantTitle, wantAuthor)
 	}
-	wantCachedPath := filepath.Join(tmp, "佚名", "照日天劫.txt")
+	wantCachedPath := filepath.Join(tmp, wantAuthor, wantTitle+".txt")
 	if cp != wantCachedPath {
 		t.Errorf("cached path = %q, want %q", cp, wantCachedPath)
 	}
@@ -289,10 +299,10 @@ func TestFormatToCache_LeavesSourceUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(cachedBytes), "第一折　七禽六兽，十三衣冠") {
+	if !strings.Contains(string(cachedBytes), "第一章　甲乙丙丁，戊己庚辛") {
 		t.Errorf("cached content missing expected title; got %q", cachedBytes)
 	}
-	if !strings.Contains(string(cachedBytes), "锦幄犹温") {
+	if !strings.Contains(string(cachedBytes), "这是一段") {
 		t.Errorf("cached content missing body; got %q", cachedBytes)
 	}
 }
@@ -358,106 +368,106 @@ func TestRestoreBackups(t *testing.T) {
 	}
 }
 
-// Smoke test against the real 照日天劫 — full FormatToCache flow in a
-// temp copy. The cached file should be parseable and yield the full
-// post-format chapter set.
-// 《十景缎》end-to-end: every `「N」` marker should make it out, including
-// the 7 that are glued mid-paragraph in the source (some after `…` /
-// `"`, some with no preceding punctuation at all).
-func TestFormatToCache_ShiJingDuan(t *testing.T) {
-	const src = "../../../books/十景缎 - 佚名.txt"
-	raw, err := os.ReadFile(src)
-	if err != nil {
-		t.Skipf("test book not present: %v", err)
-	}
-
-	tmp := t.TempDir()
-	dst := filepath.Join(tmp, "十景缎 - 佚名.txt")
-	if err := os.WriteFile(dst, raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cp, title, author, err := FormatToCache(tmp, dst)
-	if err != nil {
-		t.Fatalf("format: %v", err)
-	}
-	if title != "十景缎" || author != "佚名" {
-		t.Errorf("meta = (%q, %q), want (十景缎, 佚名)", title, author)
-	}
-
-	formatted, err := os.ReadFile(cp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, text, err := DetectAndDecode(formatted)
-	if err != nil {
-		t.Fatalf("decode formatted: %v", err)
-	}
-	chapters := ParseChapters(text, nil)
-	if len(chapters) < 217 {
-		t.Errorf("post-format chapters = %d, want >= 217", len(chapters))
-	}
-	for _, want := range []string{"「九十六」", "「一百零五」", "「一百二十四」", "「一百二十六」", "「一百八十四」", "「一百八十九」", "「一百九十九」"} {
-		found := false
-		for _, c := range chapters {
-			if c.Title == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("inline-glued chapter %q missing after format", want)
-		}
-	}
+// corpusEntry is one source file the corpus test exercises, plus the
+// regression assertions to check against the parsed chapter set. The
+// JSON config lives under whatever path `ZREADER_TEST_CORPUS` points at
+// (gitignored) — so book titles, chapter titles, and per-corpus counts
+// never end up in the repo.
+type corpusEntry struct {
+	// Path is the source TXT location. Relative paths resolve against
+	// the directory containing the config file; absolute paths are
+	// used verbatim.
+	Path string `json:"path"`
+	// MinChapters is the lower bound for ParseChapters' output. 0 = no
+	// floor check.
+	MinChapters int `json:"min_chapters,omitempty"`
+	// Contains is a list of chapter titles that must appear verbatim in
+	// the parsed set (full-string match).
+	Contains []string `json:"contains,omitempty"`
+	// Prefixes is a list of chapter-title prefixes that must each match
+	// at least one parsed chapter (HasPrefix match).
+	Prefixes []string `json:"prefixes,omitempty"`
 }
 
-func TestFormatToCache_ZhaoRiTianJie(t *testing.T) {
-	const src = "../../../books/照日天劫 - 佚名.txt"
-	raw, err := os.ReadFile(src)
-	if err != nil {
-		t.Skipf("test book not present: %v", err)
+// TestFormatToCache_Corpus drives the full FormatToCache + ParseChapters
+// pipeline against a user-supplied corpus. Set
+// `ZREADER_TEST_CORPUS=<path>/corpus.json`; the file lists books and
+// per-book assertions (see testdata/corpus.example.json for the
+// schema). Skips entirely when the env var is unset, and skips per
+// entry when its source path can't be read — keeps the test runnable
+// on fresh clones and in CI without privately-held corpus data.
+func TestFormatToCache_Corpus(t *testing.T) {
+	cfgPath := os.Getenv("ZREADER_TEST_CORPUS")
+	if cfgPath == "" {
+		t.Skip("set ZREADER_TEST_CORPUS=<path to corpus.json> to run end-to-end corpus assertions")
 	}
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read corpus config %s: %v", cfgPath, err)
+	}
+	var entries []corpusEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		t.Fatalf("parse %s: %v", cfgPath, err)
+	}
+	baseDir := filepath.Dir(cfgPath)
 
-	tmp := t.TempDir()
-	dst := filepath.Join(tmp, "照日天劫 - 佚名.txt")
-	if err := os.WriteFile(dst, raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cp, title, author, err := FormatToCache(tmp, dst)
-	if err != nil {
-		t.Fatalf("format: %v", err)
-	}
-	if title != "照日天劫" || author != "佚名" {
-		t.Errorf("meta = (%q, %q), want (照日天劫, 佚名)", title, author)
-	}
-	want := filepath.Join(tmp, "佚名", "照日天劫.txt")
-	if cp != want {
-		t.Errorf("cached path = %q, want %q", cp, want)
-	}
-
-	formatted, err := os.ReadFile(cp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, text, err := DetectAndDecode(formatted)
-	if err != nil {
-		t.Fatalf("decode formatted: %v", err)
-	}
-	chapters := ParseChapters(text, nil)
-	if len(chapters) < 19 {
-		t.Errorf("post-format chapters = %d, want >= 19", len(chapters))
-	}
-	for _, want := range []string{"第一折", "第十一折", "第十二折"} {
-		found := false
-		for _, c := range chapters {
-			if strings.HasPrefix(c.Title, want) {
-				found = true
-				break
+	for _, e := range entries {
+		src := e.Path
+		if !filepath.IsAbs(src) {
+			src = filepath.Join(baseDir, src)
+		}
+		t.Run(filepath.Base(src), func(t *testing.T) {
+			rawSrc, err := os.ReadFile(src)
+			if err != nil {
+				t.Skipf("source missing: %v", err)
 			}
-		}
-		if !found {
-			t.Errorf("no chapter starting with %q after format", want)
-		}
+			tmp := t.TempDir()
+			dst := filepath.Join(tmp, filepath.Base(src))
+			if err := os.WriteFile(dst, rawSrc, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			cp, _, _, err := FormatToCache(tmp, dst)
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			formatted, err := os.ReadFile(cp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, text, err := DetectAndDecode(formatted)
+			if err != nil {
+				t.Fatalf("decode formatted: %v", err)
+			}
+			chapters := ParseChapters(text, nil)
+
+			if e.MinChapters > 0 && len(chapters) < e.MinChapters {
+				t.Errorf("post-format chapters = %d, want >= %d", len(chapters), e.MinChapters)
+			}
+			for _, want := range e.Contains {
+				found := false
+				for _, c := range chapters {
+					if c.Title == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected exact chapter title %q missing after format", want)
+				}
+			}
+			for _, want := range e.Prefixes {
+				found := false
+				for _, c := range chapters {
+					if strings.HasPrefix(c.Title, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("no chapter starting with %q after format", want)
+				}
+			}
+		})
 	}
 }

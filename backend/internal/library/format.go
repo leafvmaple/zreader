@@ -156,9 +156,9 @@ func RestoreBackups(folder string) (int, error) {
 // chapterSplitPrecedes (they can appear in body text like `翻到第三章`).
 // The bracketed-numeral arm (`「一」`, `【3】`, …) is split unconditionally
 // — the bracket pair around a numeral is syntactically unambiguous, and
-// real-world TXTs (《十景缎》) occasionally glue the marker to the
-// previous paragraph without any terminal punctuation. The vocabulary
-// mirrors ChapterPattern / BracketedNumeralPattern in txt.go.
+// real-world TXTs occasionally glue the marker to the previous
+// paragraph without any terminal punctuation. The vocabulary mirrors
+// ChapterPattern / BracketedNumeralPattern in txt.go.
 var chapterSplitPattern = regexp.MustCompile(
 	`第\s*[\d零一二三四五六七八九十百千万0-9]+\s*[章节回卷篇集部折]` +
 		`|Chapter\s+\d+|CHAPTER\s+\d+` +
@@ -373,7 +373,7 @@ func splitTitleFromBody(paragraph string) []string {
 // body text like "翻到第三章"). Bracketed-numeral markers (`「一」`,
 // `【3】`) are always split — the bracket+numeral pair is unambiguous
 // and some sources glue the marker straight to body text with no
-// terminal punctuation (《十景缎》case).
+// terminal punctuation.
 func splitAtChapters(paragraph string) []string {
 	indices := chapterSplitPattern.FindAllStringIndex(paragraph, -1)
 	if len(indices) == 0 {

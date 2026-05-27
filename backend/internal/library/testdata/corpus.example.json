@@ -1,0 +1,12 @@
+[
+  {
+    "path": "books/<file>.txt",
+    "min_chapters": 19,
+    "prefixes": ["第一章", "第十一章", "第十二章"]
+  },
+  {
+    "path": "books/<another-file>.txt",
+    "min_chapters": 217,
+    "contains": ["「九十六」", "「一百零五」"]
+  }
+]

@@ -86,13 +86,12 @@ whole separation.
 ### Source vs cached file layout
 
 ```
-books/                          ← scan folder (the docker mount)
-  照日天劫 - 佚名.txt           ← source (top-level, untouched)
-  铸蝉记 - 佚名.txt             ← source (top-level, untouched)
-  佚名/
-    照日天劫.txt                ← formatted cache (overwritten each scan)
-  轩辕悬/
-    铸蝉记.txt                  ← formatted cache (overwritten each scan)
+books/                              ← scan folder (the docker mount)
+  <title-A> - <author-X>.txt        ← source (top-level, untouched)
+  <title-B> - <author-X>.txt        ← source (top-level, untouched)
+  <author-X>/
+    <title-A>.txt                   ← formatted cache (overwritten each scan)
+    <title-B>.txt                   ← formatted cache (overwritten each scan)
 ```
 
 Only **top-level** `*.txt` files are treated as sources. Anything in a
@@ -141,20 +140,33 @@ overrides the filename-derived title when present.
 
 ## Test corpus
 
-Three real books in `books/` (gitignored — won't be in fresh clones,
-the tests `t.Skipf` when absent):
+End-to-end format → ingest assertions live in
+`TestFormatToCache_Corpus` (see `backend/internal/library/format_test.go`).
+The test reads a JSON config pointed at by `ZREADER_TEST_CORPUS` and
+`t.Skipf`s when the env var is unset, so corpus identifiers stay out
+of the repo entirely. See `backend/internal/library/testdata/
+corpus.example.json` for the schema; per entry you can assert
+`min_chapters` as a floor, exact chapter titles via `contains`, and
+prefix matches via `prefixes`. The corpus files themselves live
+wherever the user keeps them — `books/` (gitignored) is the typical
+choice.
 
-- **《铸蝉记》** — well-formatted: every paragraph is one line, blank
-  lines between, chapter dividers are `楔子` then bare digits `1`..`10`.
-  Exercises `NamedChapterPattern` + `LooseDigitPattern` merge.
-- **《照日天劫》** — hard-wrapped at fixed width with paragraphs broken
-  across many physical lines. Chapter markers (`第X折`) glued mid-line
-  after `」` / `）` / `。`, plus `（上）（中）（下）（补）` multi-part
-  markers. Exercises `FormatText`'s wrap-rejoin + chapter-split, then
-  line-anchored detection on the formatted output.
-- **《十景缎》** — bracketed-numeral chapter markers `「一」`..`「二百
-  二十一」` on their own lines. Exercises `BracketedNumeralPattern` and
-  the regex's CJK compound-number coverage (零/百/十/individuals).
+The shapes the corpus has historically exercised (set `path` in
+`corpus.json` to a file of each kind to keep coverage):
+
+- **Well-formatted, named + numeric dividers** — one paragraph per
+  line, blank-line separators, `楔子` then bare digits `1`..`N` as
+  chapter markers. Exercises `NamedChapterPattern` +
+  `LooseDigitPattern` merge.
+- **Hard-wrapped, structured markers + multi-part chapters** —
+  fixed-width hard-wrapping with paragraphs broken across many
+  physical lines; `第X章/折` markers glued mid-line after `」` / `）`
+  / `。`, plus `（上）（中）（下）（补）` part markers. Exercises
+  `FormatText`'s wrap-rejoin + chapter-split, then line-anchored
+  detection on the formatted output.
+- **Bracketed-numeral chapters** — `「一」`..`「N」` markers on their
+  own lines. Exercises `BracketedNumeralPattern` and the regex's CJK
+  compound-number coverage (零/百/十/individuals).
 
 When a TXT defeats detection, the first thing to do is `git diff` the
 formatted output vs the original — usually a format-side fix, not a
