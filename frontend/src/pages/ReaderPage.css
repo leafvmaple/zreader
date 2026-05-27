@@ -256,50 +256,48 @@
   overflow-y: auto;
 }
 
-.toc__item button {
+.toc__sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.toc__node > button {
   width: 100%;
   text-align: left;
   background: transparent;
   border: 0;
   color: var(--r-fg);
-  padding: 10px 18px;
   font: inherit;
   cursor: pointer;
 }
 
-.toc__item button:hover { background: var(--r-overlay); }
-.toc__item--active button { color: var(--r-accent); font-weight: 500; }
-/* Nested chapters under a 卷 header sit one indent deeper. */
-.toc__item--nested button { padding-left: 34px; }
+.toc__node > button:hover { background: var(--r-overlay); }
 
-/* Volume (卷) section header. Slightly larger + heavier than chapters
-   and visually offset so the hierarchy reads at a glance. */
-.toc__volume {
-  margin-top: 4px;
+/* Container nodes (those with children) sit slightly heavier with a
+   subtle separator above so the structural hierarchy reads at a
+   glance. Leaves stay regular weight. */
+.toc__node--container > button {
+  font-weight: 600;
+}
+.toc__node--container {
   border-top: 1px solid var(--r-divider, rgba(0, 0, 0, 0.08));
+  margin-top: 4px;
 }
-.toc__volume:first-child { border-top: 0; }
-.toc__volume button {
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: 0;
-  color: var(--r-fg);
-  padding: 12px 18px 8px;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-.toc__volume button:hover { background: var(--r-overlay); }
-.toc__volume--active button { color: var(--r-accent); }
-/* Synthetic "第一卷" for books where the author introduced volumes
-   mid-way and didn't write a marker for the opening volume — static
-   label, not clickable. */
-.toc__volume--implicit {
-  padding: 12px 18px 8px;
-  font-weight: 600;
-  color: var(--r-fg-muted);
-}
+.toc__node--container:first-child { border-top: 0; }
+
+/* Depth-based indent + sizing. d0 is outermost (no extra indent), each
+   level adds 16px. Container vs leaf padding differs slightly so a
+   container header reads as a section heading rather than another
+   clickable row. */
+.toc__node--d0 > button { padding: 12px 18px 8px; }
+.toc__node--d1 > button { padding: 10px 18px 10px 34px; }
+.toc__node--d2 > button { padding: 8px 18px 8px 50px; font-size: 13px; }
+.toc__node--d3 > button { padding: 6px 18px 6px 62px; font-size: 13px; }
+
+.toc__node--d0.toc__node--leaf > button { padding: 10px 18px; font-weight: 400; }
+
+.toc__node--active > button { color: var(--r-accent); font-weight: 500; }
 
 /* --- Settings ------------------------------------------------------------ */
 

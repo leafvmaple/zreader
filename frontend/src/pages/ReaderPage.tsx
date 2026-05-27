@@ -93,34 +93,77 @@ function chapterIdxAtOffset(offset: number, chapters: Chapter[]): number {
   return idx;
 }
 
-// groupTOC walks the flat chapter list and emits sections grouped by
-// volume. A volume header (level=0) starts a new section; chapters
-// (level=1) attach to the most recent section. If the first entries are
-// chapters with at least one volume marker later in the list, they're
-// placed under an implicit "第一卷" section — covers books
-// where the author introduced volumes mid-book and the first half has
-// no explicit 卷 marker. When no volume markers exist anywhere, a
-// single header-less section holds the whole flat list (don't impose a
-// fake hierarchy on books that don't use one).
-type TOCSection = { volume: Chapter | null; chapters: Chapter[] };
+// buildTOCTree folds the flat chapter list into a nested tree using
+// Chapter.level as 0-indexed depth. Each entry is attached as a child
+// of the most recent ancestor with a strictly smaller level; entries
+// with no such ancestor become roots. The result mirrors the EPUB nav
+// tree the backend wrote, with no special-casing for "volume" vs
+// "chapter" — depth alone drives visual rendering.
+type TOCNode = { chapter: Chapter; children: TOCNode[] };
 
-function groupTOC(chapters: Chapter[]): { sections: TOCSection[]; hasAnyVolume: boolean } {
-  const sections: TOCSection[] = [];
-  const hasAnyVolume = chapters.some((c) => c.level === 0);
-  let current: TOCSection | null = null;
+function buildTOCTree(chapters: Chapter[]): TOCNode[] {
+  const roots: TOCNode[] = [];
+  const stack: TOCNode[] = [];
   for (const c of chapters) {
-    if (c.level === 0) {
-      current = { volume: c, chapters: [] };
-      sections.push(current);
-    } else {
-      if (!current) {
-        current = { volume: null, chapters: [] };
-        sections.push(current);
-      }
-      current.chapters.push(c);
+    const node: TOCNode = { chapter: c, children: [] };
+    while (stack.length > 0 && stack[stack.length - 1].chapter.level >= c.level) {
+      stack.pop();
     }
+    if (stack.length === 0) {
+      roots.push(node);
+    } else {
+      stack[stack.length - 1].children.push(node);
+    }
+    stack.push(node);
   }
-  return { sections, hasAnyVolume };
+  return roots;
+}
+
+// MAX_TOC_DEPTH caps the per-depth CSS class for indent / typography.
+// Deeper levels still render — they just share styling with the last
+// styled depth. Three depths cover every shape our parser produces
+// today (部 / 卷 / 章); push this up if we ever support 4+ tiers.
+const MAX_TOC_DEPTH = 3;
+
+function TOCNodeItem({
+  node,
+  depth,
+  currentChapter,
+  onJump,
+}: {
+  node: TOCNode;
+  depth: number;
+  currentChapter: number;
+  onJump: (idx: number) => void;
+}): React.ReactNode {
+  const hasChildren = node.children.length > 0;
+  const isActive = node.chapter.idx === currentChapter;
+  const className = [
+    'toc__node',
+    `toc__node--d${Math.min(depth, MAX_TOC_DEPTH)}`,
+    hasChildren ? 'toc__node--container' : 'toc__node--leaf',
+    isActive ? 'toc__node--active' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <li className={className}>
+      <button onClick={() => onJump(node.chapter.idx)}>{node.chapter.title}</button>
+      {hasChildren && (
+        <ul className="toc__sublist">
+          {node.children.map((c) => (
+            <TOCNodeItem
+              key={c.chapter.idx}
+              node={c}
+              depth={depth + 1}
+              currentChapter={currentChapter}
+              onJump={onJump}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
 }
 
 function TOCList({
@@ -132,35 +175,17 @@ function TOCList({
   currentChapter: number;
   onJump: (idx: number) => void;
 }): React.ReactNode {
-  const { sections, hasAnyVolume } = groupTOC(chapters);
+  const tree = buildTOCTree(chapters);
   return (
     <ul className="toc">
-      {sections.map((s, si) => (
-        <Fragment key={`sec-${si}`}>
-          {s.volume ? (
-            <li
-              className={
-                s.volume.idx === currentChapter
-                  ? 'toc__volume toc__volume--active'
-                  : 'toc__volume'
-              }
-            >
-              <button onClick={() => onJump(s.volume!.idx)}>{s.volume.title}</button>
-            </li>
-          ) : hasAnyVolume ? (
-            <li className="toc__volume toc__volume--implicit">第一卷</li>
-          ) : null}
-          {s.chapters.map((c) => (
-            <li
-              key={c.idx}
-              className={`toc__item${hasAnyVolume ? ' toc__item--nested' : ''}${
-                c.idx === currentChapter ? ' toc__item--active' : ''
-              }`}
-            >
-              <button onClick={() => onJump(c.idx)}>{c.title}</button>
-            </li>
-          ))}
-        </Fragment>
+      {tree.map((n) => (
+        <TOCNodeItem
+          key={n.chapter.idx}
+          node={n}
+          depth={0}
+          currentChapter={currentChapter}
+          onJump={onJump}
+        />
       ))}
     </ul>
   );

@@ -15,13 +15,13 @@ package library
 //     blank line between chapters. Chapter byte / char offsets index
 //     into this string — the same scheme handleBookContent expects.
 //
-// Level extraction maps the nav tree onto the existing 2-level contract:
-//   - `<li>` with a nested `<ol>` → Level=0 (container, e.g. volume)
-//   - `<li>` without nested `<ol>` → Level=1 (leaf chapter)
-// For our own EPUBs (always 2 levels max) this round-trips faithfully.
-// For deeper third-party EPUBs middle nodes also become Level=0; the
-// reader UI renders them as headers — not a perfect nesting but the
-// data is preserved.
+// Level extraction tracks the actual `<li>` nesting depth in the nav
+// `<ol>` tree: outermost `<li>` → Level=0, one level nested → Level=1,
+// and so on. The convention is 0-indexed depth from the outer list,
+// matching what BuildEpub writes — so a (text, chapters) → BuildEpub
+// → ReadEpub round-trip preserves Level values exactly. Downstream
+// code (frontend TOC) treats Level as nesting depth, so books with
+// arbitrarily many tiers render correctly.
 
 import (
 	"archive/zip"
@@ -77,7 +77,8 @@ func ReadEpub(epubPath string) (*EpubBook, error) {
 	}
 
 	// hrefLevels maps a manifest href (the EXACT string in OPF) to its
-	// nav-derived level. Missing entries default to Level=1.
+	// nav-derived depth (0-indexed). Missing entries (no nav doc, or
+	// href not listed in nav) default to Level=0 — treat as flat.
 	hrefLevels := map[string]int{}
 	if navHref != "" {
 		navFullPath := joinEpubPath(opfDir, navHref)
@@ -117,7 +118,7 @@ func ReadEpub(epubPath string) (*EpubBook, error) {
 			charOffset += 2 + utf8.RuneCountInString(p)
 		}
 
-		level := 1
+		level := 0
 		if l, ok := hrefLevels[href]; ok {
 			level = l
 		}
@@ -224,22 +225,25 @@ func readOPF(z *zip.Reader, opfPath string) (*opfPackage, error) {
 }
 
 // readNavLevels walks the nav.xhtml token stream and returns a map of
-// chapter href → level (0 if the `<li>` has a nested `<ol>`, 1 if leaf).
-// Hrefs are returned exactly as written in the nav doc, with any URL
-// fragment stripped — they should match the manifest href the caller
-// looks up against.
+// chapter href → 0-indexed nesting depth. Depth is the count of open
+// `<li>` ancestors at the time the `<a href>` is encountered, minus
+// one — outermost list items are Level=0, items nested under another
+// `<li>` are Level=1, doubly-nested are Level=2, etc. Hrefs are
+// returned exactly as written in the nav doc, with URL fragments
+// stripped, so the caller can match them against manifest entries
+// directly.
+//
+// When the same href appears more than once (rare, but possible in
+// hand-authored EPUBs), the FIRST occurrence wins — that's the
+// canonical anchor for the chapter.
 func readNavLevels(z *zip.Reader, navPath string) (map[string]int, error) {
 	raw, err := readZipFile(z, navPath)
 	if err != nil {
 		return nil, fmt.Errorf("read nav: %w", err)
 	}
 
-	type liState struct {
-		href     string
-		hasChild bool
-	}
-	stack := make([]*liState, 0, 4)
 	out := map[string]int{}
+	liDepth := 0 // count of currently-open <li> ancestors
 
 	dec := xml.NewDecoder(bytes.NewReader(raw))
 	dec.Strict = false
@@ -257,35 +261,25 @@ func readNavLevels(z *zip.Reader, navPath string) (map[string]int, error) {
 		case xml.StartElement:
 			switch strings.ToLower(t.Name.Local) {
 			case "li":
-				stack = append(stack, &liState{})
+				liDepth++
 			case "a":
-				if len(stack) > 0 {
+				if liDepth > 0 {
 					for _, a := range t.Attr {
 						if strings.ToLower(a.Name.Local) == "href" {
-							stack[len(stack)-1].href = a.Value
+							href := a.Value
+							if i := strings.IndexByte(href, '#'); i >= 0 {
+								href = href[:i]
+							}
+							if _, exists := out[href]; !exists {
+								out[href] = liDepth - 1
+							}
 						}
 					}
 				}
-			case "ol":
-				if len(stack) > 0 {
-					stack[len(stack)-1].hasChild = true
-				}
 			}
 		case xml.EndElement:
-			if strings.ToLower(t.Name.Local) == "li" && len(stack) > 0 {
-				top := stack[len(stack)-1]
-				stack = stack[:len(stack)-1]
-				if top.href != "" {
-					href := top.href
-					if i := strings.IndexByte(href, '#'); i >= 0 {
-						href = href[:i]
-					}
-					level := 1
-					if top.hasChild {
-						level = 0
-					}
-					out[href] = level
-				}
+			if strings.ToLower(t.Name.Local) == "li" && liDepth > 0 {
+				liDepth--
 			}
 		}
 	}

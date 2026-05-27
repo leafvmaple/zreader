@@ -36,18 +36,17 @@ const (
 	chapterNumeral = `[\d零〇一二三四五六七八九十百千万]`
 
 	// structuredUnit is the unit char that follows the index in
-	// `第X<unit>` chapter markers. `卷` is INTENTIONALLY absent so
-	// volume markers can be matched separately by VolumePattern at
-	// level=0; mixing the two would put 卷 headers flat in the TOC
-	// next to their child chapters.
-	structuredUnit = `[章节回篇集部折]`
+	// `第X<unit>` chapter markers. `卷` and `部` are INTENTIONALLY
+	// absent — they're matched separately by VolumePattern /
+	// PartPattern at their own tiers; mixing them in would put 部
+	// and 卷 headers flat in the TOC next to their child chapters.
+	structuredUnit = `[章节回篇集折]`
 
-	// anyStructuredUnit adds 卷 to structuredUnit. Used by format-
-	// time passes that treat all marker types uniformly — e.g.
-	// promoting a chapter marker glued mid-paragraph onto its own
-	// paragraph regardless of whether it's a chapter or volume.
-	// Parsing keeps the two tiers separate so they end up at
-	// different levels.
+	// anyStructuredUnit adds 卷 and 部 to structuredUnit. Used by
+	// format-time passes that treat all marker types uniformly —
+	// e.g. promoting a marker glued mid-paragraph onto its own
+	// paragraph regardless of which tier it belongs to. Parsing
+	// keeps the tiers separate so they end up at different levels.
 	anyStructuredUnit = `[章节回卷篇集部折]`
 
 	// bracketedNumeralBody is the standalone `「N」` / `【N】` /

@@ -27,13 +27,14 @@ func writeEpubToTemp(t *testing.T, title, author, text string, chapters []Chapte
 }
 
 func TestReadEpub_RoundTripFlat(t *testing.T) {
-	// A flat book: two chapters at Level=1, no volumes. ReadEpub should
-	// preserve titles, order, and flat text; offsets should index into
+	// A flat book: two chapters at Level=0 (chapter tier is the only
+	// tier present, so normaliseLevels ranks it at 0). ReadEpub
+	// preserves titles, order, and flat text; offsets index into
 	// FlatText so slicing reproduces each chapter's source.
 	text := "第一章　起\n\n正文段一。\n\n正文段二。\n\n第二章　承\n\n正文段三。\n"
 	chapters := []Chapter{
-		{Idx: 1, Title: "第一章　起", Level: 1, ByteOffset: 0, CharOffset: 0},
-		{Idx: 2, Title: "第二章　承", Level: 1, ByteOffset: strings.Index(text, "第二章")},
+		{Idx: 1, Title: "第一章　起", Level: 0, ByteOffset: 0, CharOffset: 0},
+		{Idx: 2, Title: "第二章　承", Level: 0, ByteOffset: strings.Index(text, "第二章")},
 	}
 
 	p := writeEpubToTemp(t, "示例书", "佚名", text, chapters)
@@ -55,8 +56,8 @@ func TestReadEpub_RoundTripFlat(t *testing.T) {
 		t.Errorf("chapter titles wrong: %+v", book.Chapters)
 	}
 	for i, c := range book.Chapters {
-		if c.Level != 1 {
-			t.Errorf("chapter %d level = %d, want 1 (flat book)", i, c.Level)
+		if c.Level != 0 {
+			t.Errorf("chapter %d level = %d, want 0 (flat book)", i, c.Level)
 		}
 	}
 
@@ -80,8 +81,9 @@ func TestReadEpub_RoundTripFlat(t *testing.T) {
 }
 
 func TestReadEpub_RoundTripWithVolumes(t *testing.T) {
-	// One volume containing two chapters. ReadEpub must classify the
-	// volume as Level=0 (has children in nav) and chapters as Level=1.
+	// One volume containing two chapters. ReadEpub reads <li> depth
+	// directly: the volume's <li> is at depth 1 (Level=0), the
+	// chapter <li>s are nested one deeper (Level=1).
 	text := "第一卷　序卷\n\n卷首一段。\n\n第一章　起\n\n正文段一。\n\n第二章　承\n\n正文段二。\n"
 	chapters := []Chapter{
 		{Idx: 1, Title: "第一卷　序卷", Level: 0, ByteOffset: 0},
@@ -101,8 +103,8 @@ func TestReadEpub_RoundTripWithVolumes(t *testing.T) {
 		title string
 		level int
 	}{
-		{"第一卷　序卷", 0}, // container in nav → Level=0
-		{"第一章　起", 1},   // leaf in nav → Level=1
+		{"第一卷　序卷", 0}, // outermost <li> in nav → depth 0
+		{"第一章　起", 1},   // nested under the volume → depth 1
 		{"第二章　承", 1},
 	}
 	for i, w := range want {
@@ -120,9 +122,9 @@ func TestReadEpub_OffsetsAreConsistent(t *testing.T) {
 	// rune-vs-byte mix-ups.
 	text := "第一章　甲\n\n甲段。\n\n第二章　乙\n\n乙段一。\n\n乙段二。\n\n第三章　丙\n\n丙段。\n"
 	chapters := []Chapter{
-		{Idx: 1, Title: "第一章　甲", Level: 1, ByteOffset: 0},
-		{Idx: 2, Title: "第二章　乙", Level: 1, ByteOffset: strings.Index(text, "第二章")},
-		{Idx: 3, Title: "第三章　丙", Level: 1, ByteOffset: strings.Index(text, "第三章")},
+		{Idx: 1, Title: "第一章　甲", Level: 0, ByteOffset: 0},
+		{Idx: 2, Title: "第二章　乙", Level: 0, ByteOffset: strings.Index(text, "第二章")},
+		{Idx: 3, Title: "第三章　丙", Level: 0, ByteOffset: strings.Index(text, "第三章")},
 	}
 	p := writeEpubToTemp(t, "示例书", "佚名", text, chapters)
 	book, err := ReadEpub(p)
@@ -173,8 +175,8 @@ func trimPreview(s string, n int) string {
 func TestReadEpub_FlatTextMatchesInput(t *testing.T) {
 	text := "第一章　起\n\n正文段一。\n\n正文段二。\n\n第二章　承\n\n正文段三。\n"
 	chapters := []Chapter{
-		{Idx: 1, Title: "第一章　起", Level: 1, ByteOffset: 0},
-		{Idx: 2, Title: "第二章　承", Level: 1, ByteOffset: strings.Index(text, "第二章")},
+		{Idx: 1, Title: "第一章　起", Level: 0, ByteOffset: 0},
+		{Idx: 2, Title: "第二章　承", Level: 0, ByteOffset: strings.Index(text, "第二章")},
 	}
 	p := writeEpubToTemp(t, "示例书", "佚名", text, chapters)
 	book, err := ReadEpub(p)

@@ -102,6 +102,24 @@ var VolumePattern = regexp.MustCompile(
 		`[\s\p{Zs}]*$`,
 )
 
+// PartPattern matches a 部 header on its own line (`第X部[subtitle]`).
+// Whole-line anchored to reject body mentions like "他翻到下一部
+// 里..." — 部 is rare enough as a structural marker that this is the
+// safer trade-off. The (subtitle bounded to 30 chars) allows for
+// short part subtitles like "亡命天涯" while still rejecting long
+// body sentences that happen to contain `第X部`.
+//
+// Books that use 部 as an outermost grouping (above 卷) are uncommon
+// but real — the TOC tree builder treats this as tier 0 (outer-most)
+// when present.
+//
+// Group 1 captures the full title.
+var PartPattern = regexp.MustCompile(
+	`^[\s\p{Zs}]*` +
+		`(第\s*` + chapterNumeral + `+\s*部[^\r\n]{0,30})` +
+		`[\s\p{Zs}]*$`,
+)
+
 // NamedChapterPattern matches well-known Chinese named chapters ("楔子",
 // "序章", "尾声", etc.) when they occupy their own line. The words appear
 // frequently in body text, so even after format we trust them only when
@@ -233,49 +251,100 @@ type Chapter struct {
 // via the scanner's format step) for chapter headers.
 //
 // When `re` is non-nil the caller's regex is the only matcher used and
-// every match is emitted at level=1 (the caller is treating the regex
-// as a chapter-level matcher; volume detection would need its own pass
-// and isn't supported through this hook).
+// every match is emitted at level=0 (the caller is treating the regex
+// as a single-tier matcher; multi-tier detection would need separate
+// passes and isn't supported through this hook).
 //
 // When `re` is nil we apply a tiered strategy:
-//  1. VolumePattern — `第X卷` / `卷X` headers (level=0).
-//  2. ChapterPattern ∪ NamedChapterPattern ∪ BracketedNumeralPattern ∪
+//  1. PartPattern — `第X部` headers (tier 0, outermost grouping).
+//  2. VolumePattern — `第X卷` / `卷X` headers (tier 1).
+//  3. ChapterPattern ∪ NamedChapterPattern ∪ BracketedNumeralPattern ∪
 //     EnumeratedNumeralPattern — structured + named + bracketed CJK
-//     numerals + `<numeral>、<subtitle>` enumeration (level=1).
-//  3. If the chapter-level tier is sparse, also merge in LooseDigitPattern
-//     (level=1) — for books that use bare numeric dividers like "1", "2".
-//  4. Synthetic "正文" (level=1) if nothing matches.
+//     numerals + `<numeral>、<subtitle>` enumeration (tier 2, leaf).
+//  4. If the chapter tier is sparse, also merge in LooseDigitPattern
+//     — for books that use bare numeric dividers like "1", "2".
+//  5. Synthetic "正文" if nothing matches.
+//
+// Tiers are then renumbered to 0-indexed TOC depth via normaliseLevels:
+// a book that uses only the chapter tier gets all entries at Level=0;
+// a 卷+章 book gets 卷=0 / 章=1; a 部+卷+章 book gets 部=0 / 卷=1 / 章=2.
+// Downstream code (BuildEpub's tree builder, frontend TOC) treats Level
+// as nesting depth without needing to know which markers were involved.
 func ParseChapters(text string, re *regexp.Regexp) []Chapter {
 	if re != nil {
-		out := scanLineAnchored(text, re, 1)
+		out := scanLineAnchored(text, re, 0)
 		if len(out) == 0 {
 			return syntheticChapter()
 		}
 		return out
 	}
 
-	volumes := scanLineAnchored(text, VolumePattern, 0)
+	parts := scanLineAnchored(text, PartPattern, tierPart)
+	volumes := scanLineAnchored(text, VolumePattern, tierVolume)
 	chapters := mergeChapters(
-		scanLineAnchored(text, ChapterPattern, 1),
-		scanLineAnchored(text, NamedChapterPattern, 1),
-		scanLineAnchored(text, BracketedNumeralPattern, 1),
-		scanLineAnchored(text, EnumeratedNumeralPattern, 1),
+		scanLineAnchored(text, ChapterPattern, tierChapter),
+		scanLineAnchored(text, NamedChapterPattern, tierChapter),
+		scanLineAnchored(text, BracketedNumeralPattern, tierChapter),
+		scanLineAnchored(text, EnumeratedNumeralPattern, tierChapter),
 	)
-	primary := mergeChapters(volumes, chapters)
+	primary := mergeChapters(parts, volumes, chapters)
 
 	if len(chapters) >= minPrimaryForNoFallback {
-		return primary
+		return normaliseLevels(primary)
 	}
 
-	loose := scanLineAnchored(text, LooseDigitPattern, 1)
+	loose := scanLineAnchored(text, LooseDigitPattern, tierChapter)
 	if len(loose) >= minLooseForFallback {
-		return mergeChapters(primary, loose)
+		return normaliseLevels(mergeChapters(primary, loose))
 	}
 
 	if len(primary) > 0 {
-		return primary
+		return normaliseLevels(primary)
 	}
 	return syntheticChapter()
+}
+
+// Raw scan tiers. Higher = deeper / more leaf-like. Final TOC Level is
+// derived by normaliseLevels — these values are only used internally
+// during merge to keep parts above volumes above chapters when offsets
+// collide.
+const (
+	tierPart    = 0
+	tierVolume  = 1
+	tierChapter = 2
+)
+
+// normaliseLevels rewrites raw tier values into 0-indexed TOC depth.
+// Each entry carries its scan-time tier; the final Level is its rank
+// in the set of tiers actually present in this book. The convention:
+//
+//	flat chapter book (only tierChapter)            → all Level=0
+//	卷+章 book (tierVolume + tierChapter)           → 卷 Level=0, 章 Level=1
+//	部+卷+章 book (all three tiers)                 → 部 Level=0, 卷 Level=1, 章 Level=2
+//
+// Books that mix tiers unevenly (e.g. parts + chapters but no volumes)
+// likewise collapse to consecutive levels — present tiers always rank
+// 0, 1, 2… so the TOC never has empty "depth holes".
+func normaliseLevels(chapters []Chapter) []Chapter {
+	present := map[int]bool{}
+	for _, c := range chapters {
+		present[c.Level] = true
+	}
+	tiers := make([]int, 0, len(present))
+	for t := range present {
+		tiers = append(tiers, t)
+	}
+	sort.Ints(tiers)
+	rank := make(map[int]int, len(tiers))
+	for i, t := range tiers {
+		rank[t] = i
+	}
+	out := make([]Chapter, len(chapters))
+	for i, c := range chapters {
+		c.Level = rank[c.Level]
+		out[i] = c
+	}
+	return out
 }
 
 // scanLineAnchored walks text by physical lines and emits a Chapter for
@@ -363,7 +432,7 @@ func mergeChapters(lists ...[]Chapter) []Chapter {
 }
 
 func syntheticChapter() []Chapter {
-	return []Chapter{{Idx: 1, Title: "正文", Level: 1, CharOffset: 0, ByteOffset: 0}}
+	return []Chapter{{Idx: 1, Title: "正文", Level: 0, CharOffset: 0, ByteOffset: 0}}
 }
 
 // TxtMetadata is what DetectMetadata harvests from a file's leading

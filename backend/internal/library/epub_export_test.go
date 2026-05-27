@@ -49,11 +49,12 @@ func epubFileNames(t *testing.T, buf []byte) []string {
 }
 
 func TestBuildEpub_BasicShape(t *testing.T) {
-	// Two flat chapters, ByteOffsets line up with the formatted text.
+	// Two flat chapters at Level=0 (flat-only books rank their single
+	// tier to 0). ByteOffsets line up with the formatted text.
 	text := "第一章　起\n\n正文段一。\n\n正文段二。\n\n第二章　承\n\n正文段三。\n"
 	chapters := []Chapter{
-		{Idx: 1, Title: "第一章　起", Level: 1, ByteOffset: 0, CharOffset: 0},
-		{Idx: 2, Title: "第二章　承", Level: 1, ByteOffset: strings.Index(text, "第二章"), CharOffset: 0},
+		{Idx: 1, Title: "第一章　起", Level: 0, ByteOffset: 0, CharOffset: 0},
+		{Idx: 2, Title: "第二章　承", Level: 0, ByteOffset: strings.Index(text, "第二章"), CharOffset: 0},
 	}
 
 	var buf bytes.Buffer

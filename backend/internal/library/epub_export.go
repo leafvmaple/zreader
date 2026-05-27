@@ -73,7 +73,7 @@ func BuildEpub(w io.Writer, title, author, formattedText string, chapters []Chap
 		author = DefaultAuthor
 	}
 	if len(chapters) == 0 {
-		chapters = []Chapter{{Idx: 1, Title: title, Level: 1, ByteOffset: 0, CharOffset: 0}}
+		chapters = []Chapter{{Idx: 1, Title: title, Level: 0, ByteOffset: 0, CharOffset: 0}}
 	}
 
 	roots, flat := buildSections(formattedText, chapters)

@@ -239,8 +239,10 @@ func TestParseChapters_EnumeratedNumerals(t *testing.T) {
 		if c.Title != wantTitles[i] {
 			t.Errorf("idx %d: title=%q, want %q", i, c.Title, wantTitles[i])
 		}
-		if c.Level != 1 {
-			t.Errorf("idx %d: level=%d, want 1", i, c.Level)
+		// Flat-only book: chapter tier is the only tier present, so
+		// normaliseLevels ranks it at 0.
+		if c.Level != 0 {
+			t.Errorf("idx %d: level=%d, want 0 (flat book)", i, c.Level)
 		}
 	}
 }
@@ -260,12 +262,77 @@ func TestParseChapters_EnumeratedNotInsideBody(t *testing.T) {
 
 func TestParseChapters_VolumeNotInsideBody(t *testing.T) {
 	// "...第二卷..." mentioned inside a body paragraph must NOT match
-	// VolumePattern — the pattern is whole-line anchored.
+	// VolumePattern — the pattern is whole-line anchored. Without a
+	// volume tier the book is flat (chapter-only), so we assert by
+	// title that the body-line volumes never became chapter entries.
 	text := "第一章　甲乙丙丁\n他翻到第二卷的目录页查看。\n继续阅读第三卷里的内容。\n第二章　子丑寅卯\n正文\n"
 	out := ParseChapters(text, nil)
+	if len(out) != 2 {
+		t.Fatalf("want 2 chapters (no volume false-positives), got %d: %+v", len(out), out)
+	}
 	for _, c := range out {
-		if c.Level == 0 {
-			t.Errorf("volume false-positive inside body: %+v", c)
+		if strings.Contains(c.Title, "卷") {
+			t.Errorf("body-line volume leaked into TOC: %+v", c)
+		}
+	}
+}
+
+func TestParseChapters_PartVolumeChapter(t *testing.T) {
+	// Three-tier book: 第X部 → 第X卷 → 第X章. PartPattern, VolumePattern
+	// and ChapterPattern each pick their own tier; normaliseLevels then
+	// renumbers them to 0/1/2 because all three tiers are present.
+	text := "第一部　甲乙\n\n" +
+		"第一卷　丙丁\n\n" +
+		"第一章　戊己\n正文。\n\n" +
+		"第二章　庚辛\n正文。\n\n" +
+		"第二卷　壬癸\n\n" +
+		"第一章　子丑\n正文。\n\n" +
+		"第二部　寅卯\n\n" +
+		"第一卷　辰巳\n\n" +
+		"第一章　午未\n正文。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 9 {
+		t.Fatalf("want 9 entries (2 parts + 3 vols + 4 chaps), got %d: %+v", len(out), out)
+	}
+	want := []struct {
+		title string
+		level int
+	}{
+		{"第一部　甲乙", 0},
+		{"第一卷　丙丁", 1},
+		{"第一章　戊己", 2},
+		{"第二章　庚辛", 2},
+		{"第二卷　壬癸", 1},
+		{"第一章　子丑", 2},
+		{"第二部　寅卯", 0},
+		{"第一卷　辰巳", 1},
+		{"第一章　午未", 2},
+	}
+	for i, w := range want {
+		if out[i].Title != w.title || out[i].Level != w.level {
+			t.Errorf("entry %d: got (%q, level=%d), want (%q, level=%d)",
+				i, out[i].Title, out[i].Level, w.title, w.level)
+		}
+	}
+}
+
+func TestParseChapters_PartChapterNoVolume(t *testing.T) {
+	// Two-tier book that skips 卷: parts directly contain chapters.
+	// Only tiers 0 (part) and 2 (chapter) are present, so they rank
+	// to Level 0 and Level 1 — no empty "depth hole" at level 1.
+	text := "第一部　甲乙\n\n" +
+		"第一章　丙丁\n正文。\n\n" +
+		"第二章　戊己\n正文。\n\n" +
+		"第二部　庚辛\n\n" +
+		"第一章　壬癸\n正文。\n"
+	out := ParseChapters(text, nil)
+	wantLevels := []int{0, 1, 1, 0, 1}
+	if len(out) != len(wantLevels) {
+		t.Fatalf("want %d entries, got %d: %+v", len(wantLevels), len(out), out)
+	}
+	for i, want := range wantLevels {
+		if out[i].Level != want {
+			t.Errorf("entry %d (%q): level=%d, want %d", i, out[i].Title, out[i].Level, want)
 		}
 	}
 }
