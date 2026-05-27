@@ -71,13 +71,18 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 		s.infof("phase 0: restored %d legacy .bak source(s)", restored)
 	}
 
-	// Phase 1 — format sources to cached paths.
-	type cachedEntry struct {
-		path   string
-		title  string
-		author string
+	// Phase 0.5 — drop legacy `.txt` cache files left by the pre-EPUB
+	// design. Safe to run unconditionally: it only touches `.txt`
+	// files in subdirectories (source TXTs at the top level are
+	// untouched). Becomes a no-op after the first post-upgrade scan.
+	if removed, err := CleanLegacyTxtCache(folder.Path); err != nil {
+		s.warnf("clean legacy txt cache in %s: %v", folder.Path, err)
+	} else if removed > 0 {
+		s.infof("phase 0.5: removed %d stale .txt cache file(s)", removed)
 	}
-	var cached []cachedEntry
+
+	// Phase 1 — format sources to cached EPUBs.
+	var cached []CacheResult
 	walkErr := filepath.WalkDir(folder.Path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			s.warnf("walk error at %s: %v", path, err)
@@ -103,34 +108,28 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 			return ctx.Err()
 		}
 
-		cp, title, author, err := FormatToCache(folder.Path, path)
+		cr, err := FormatToCache(folder.Path, path)
 		if err != nil {
 			s.warnf("format %s: %v", filepath.Base(path), err)
 			res.Failed = append(res.Failed, path)
 			return nil
 		}
-		s.infof("format %s → %s (author=%q title=%q)",
-			filepath.Base(path), relPath(folder.Path, cp), author, title)
-		cached = append(cached, cachedEntry{path: cp, title: title, author: author})
+		s.infof("format %s → %s (author=%q title=%q enc=%s)",
+			filepath.Base(path), relPath(folder.Path, cr.Path), cr.Author, cr.Title, cr.SourceEnc)
+		cached = append(cached, cr)
 		return nil
 	})
 	if walkErr != nil && walkErr != context.Canceled {
 		return res, walkErr
 	}
 
-	// Phase 2 — ingest cached files.
+	// Phase 2 — ingest cached EPUBs.
 	presentPaths := make([]string, 0, len(cached))
 	for _, c := range cached {
-		st, err := os.Stat(c.path)
+		book, isNew, err := s.ingestFile(ctx, folder.ID, c)
 		if err != nil {
-			s.warnf("stat cached %s: %v", c.path, err)
-			res.Failed = append(res.Failed, c.path)
-			continue
-		}
-		book, isNew, err := s.ingestFile(ctx, folder.ID, c.path, c.title, c.author, st)
-		if err != nil {
-			s.warnf("ingest %s: %v", c.path, err)
-			res.Failed = append(res.Failed, c.path)
+			s.warnf("ingest %s: %v", c.Path, err)
+			res.Failed = append(res.Failed, c.Path)
 			continue
 		}
 		presentPaths = append(presentPaths, book.Path)
@@ -154,46 +153,41 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 	return res, nil
 }
 
-// ingestFile decodes a cached TXT, parses chapters, and persists the
-// row + chapter list. Title and author are passed in by ScanFolder
-// (already resolved at format time) so we never need a second
-// DetectMetadata pass here — the metadata path is the only thing we
-// need to look up from the file content.
-func (s *Scanner) ingestFile(ctx context.Context, folderID int64, path, title, author string, st fs.FileInfo) (store.Book, bool, error) {
-	name := filepath.Base(path)
+// ingestFile reads a cached EPUB, derives chapters + char count from
+// its nav + spine, and persists the book row + chapter rows. The
+// source-side metadata (encoding, mtime, byte size, content hash)
+// comes straight from CacheResult — Phase 1 already saw the TXT and
+// there's no reason to re-stat it.
+//
+// Book row's Path is the cached EPUB path. Format is "epub" — TXT is
+// only an input format from this layer up.
+func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult) (store.Book, bool, error) {
+	name := filepath.Base(cr.Path)
 
-	raw, err := os.ReadFile(path)
+	epubBook, err := ReadEpub(cr.Path)
 	if err != nil {
-		return store.Book{}, false, fmt.Errorf("read file: %w", err)
+		return store.Book{}, false, fmt.Errorf("read epub: %w", err)
 	}
 
-	encName, text, err := DetectAndDecode(raw)
-	if err != nil {
-		return store.Book{}, false, fmt.Errorf("decode: %w", err)
-	}
-
-	chapters := ParseChapters(text, nil)
-	hash := headHash(raw)
-
-	authorLog := author
+	authorLog := cr.Author
 	if authorLog == "" {
 		authorLog = "?"
 	}
 	s.infof("ingest %s: enc=%s chars=%d chapters=%d title=%q author=%s",
-		name, encName, utf8.RuneCountInString(text), len(chapters), title, authorLog)
+		name, cr.SourceEnc, utf8.RuneCountInString(epubBook.FlatText), len(epubBook.Chapters), cr.Title, authorLog)
 
 	book := store.Book{
 		FolderID:     folderID,
-		Path:         path,
-		Title:        title,
-		Author:       sql.NullString{String: author, Valid: author != "" && author != DefaultAuthor},
-		Format:       "txt",
-		Encoding:     sql.NullString{String: encName, Valid: encName != ""},
-		SizeBytes:    st.Size(),
-		CharCount:    sql.NullInt64{Int64: int64(utf8.RuneCountInString(text)), Valid: true},
-		ChapterCount: sql.NullInt64{Int64: int64(len(chapters)), Valid: true},
-		FileMtime:    st.ModTime().Unix(),
-		FileHash:     sql.NullString{String: hash, Valid: hash != ""},
+		Path:         cr.Path,
+		Title:        cr.Title,
+		Author:       sql.NullString{String: cr.Author, Valid: cr.Author != "" && cr.Author != DefaultAuthor},
+		Format:       "epub",
+		Encoding:     sql.NullString{String: cr.SourceEnc, Valid: cr.SourceEnc != ""},
+		SizeBytes:    cr.SourceSize,
+		CharCount:    sql.NullInt64{Int64: int64(utf8.RuneCountInString(epubBook.FlatText)), Valid: true},
+		ChapterCount: sql.NullInt64{Int64: int64(len(epubBook.Chapters)), Valid: true},
+		FileMtime:    cr.SourceMtime,
+		FileHash:     sql.NullString{String: cr.SourceHash, Valid: cr.SourceHash != ""},
 	}
 
 	id, isNew, err := s.Store.UpsertBook(ctx, book)
@@ -202,8 +196,8 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, path, title, a
 	}
 	book.ID = id
 
-	storeChapters := make([]store.Chapter, 0, len(chapters))
-	for _, c := range chapters {
+	storeChapters := make([]store.Chapter, 0, len(epubBook.Chapters))
+	for _, c := range epubBook.Chapters {
 		storeChapters = append(storeChapters, store.Chapter{
 			Idx:        int64(c.Idx),
 			Title:      c.Title,

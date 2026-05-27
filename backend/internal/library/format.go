@@ -111,47 +111,121 @@ func ResolveMetadata(sourceName string, fromText TxtMetadata) (title, author str
 	return title, author
 }
 
-// CachedPath returns the per-book formatted-output path inside folder:
-// `<folder>/<author>/<title>.txt`. Both segments are sanitised.
+// CachedPath returns the per-book cached-EPUB path inside folder:
+// `<folder>/<author>/<title>.epub`. Both segments are sanitised.
+//
+// EPUB is the canonical cached format — the TXT source is normalised
+// once during scan (FormatText + ParseChapters) and the EPUB carries
+// the resulting structure for every downstream consumer. Source TXTs
+// stay untouched at the folder's top level.
 func CachedPath(folder, author, title string) string {
-	return filepath.Join(folder, sanitizePathComponent(author), sanitizePathComponent(title)+".txt")
+	return filepath.Join(folder, sanitizePathComponent(author), sanitizePathComponent(title)+".epub")
 }
 
-// FormatToCache reads a source TXT, formats it (FormatText), and writes
-// the result to `<folder>/<author>/<title>.txt` — never mutating the
-// source. Returns the cached path plus the resolved title and author
-// (caller persists these in the store along with the path).
+// CacheResult is what FormatToCache hands back to the scanner. The
+// scanner uses Path during Phase 2 to ingest, and persists everything
+// else as book metadata. Encoding and Hash refer to the SOURCE TXT,
+// not the cached EPUB — the cache is always UTF-8 EPUB so its own
+// encoding / hash carry no meaningful information.
+type CacheResult struct {
+	Path         string
+	Title        string
+	Author       string
+	SourceEnc    string // detected encoding of the source TXT (e.g. "UTF-8", "GBK")
+	SourceHash   string // hex sha256 of the source TXT's first 64 KiB
+	SourceSize   int64  // byte size of the source TXT on disk
+	SourceMtime  int64  // mtime of the source TXT, unix seconds
+}
+
+// FormatToCache reads a source TXT, runs the format + chapter-parse
+// pipeline, and writes an EPUB to `<folder>/<author>/<title>.epub` —
+// never mutating the source. Returns the cached path plus metadata
+// the scanner needs for persistence.
 //
 // The cached file is overwritten on every call; the scanner relies on
 // this to re-apply format changes whenever the format logic is updated.
-// Output is always UTF-8.
-func FormatToCache(folder, sourcePath string) (cachedPath, title, author string, err error) {
+// Output is always EPUB 3 (see BuildEpub) — TXT is purely an input
+// format from this point on, and the messy chapter-detection / shape
+// normalisation work that runs here is the only place the TXT spec
+// lives in the system. Everything downstream reads EPUB.
+func FormatToCache(folder, sourcePath string) (CacheResult, error) {
 	raw, err := os.ReadFile(sourcePath)
 	if err != nil {
-		return "", "", "", fmt.Errorf("read: %w", err)
+		return CacheResult{}, fmt.Errorf("read: %w", err)
 	}
-	_, text, err := DetectAndDecode(raw)
+	st, err := os.Stat(sourcePath)
 	if err != nil {
-		return "", "", "", fmt.Errorf("decode: %w", err)
+		return CacheResult{}, fmt.Errorf("stat source: %w", err)
+	}
+	encName, text, err := DetectAndDecode(raw)
+	if err != nil {
+		return CacheResult{}, fmt.Errorf("decode: %w", err)
 	}
 	meta := DetectMetadata(text)
-	title, author = ResolveMetadata(filepath.Base(sourcePath), meta)
+	title, author := ResolveMetadata(filepath.Base(sourcePath), meta)
 
 	formatted := FormatText(text, title, author)
+	chapters := ParseChapters(formatted, nil)
 
-	cachedPath = CachedPath(folder, author, title)
+	cachedPath := CachedPath(folder, author, title)
 	if err := os.MkdirAll(filepath.Dir(cachedPath), 0o755); err != nil {
-		return "", "", "", fmt.Errorf("mkdir: %w", err)
+		return CacheResult{}, fmt.Errorf("mkdir: %w", err)
 	}
 	tmpPath := cachedPath + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(formatted), 0o644); err != nil {
-		return "", "", "", fmt.Errorf("write temp: %w", err)
+	tmpFile, err := os.Create(tmpPath)
+	if err != nil {
+		return CacheResult{}, fmt.Errorf("create temp: %w", err)
+	}
+	if _, err := BuildEpub(tmpFile, title, author, formatted, chapters); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return CacheResult{}, fmt.Errorf("build epub: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return CacheResult{}, fmt.Errorf("close temp: %w", err)
 	}
 	if err := os.Rename(tmpPath, cachedPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return "", "", "", fmt.Errorf("rename: %w", err)
+		return CacheResult{}, fmt.Errorf("rename: %w", err)
 	}
-	return cachedPath, title, author, nil
+	return CacheResult{
+		Path:        cachedPath,
+		Title:       title,
+		Author:      author,
+		SourceEnc:   encName,
+		SourceHash:  headHash(raw),
+		SourceSize:  st.Size(),
+		SourceMtime: st.ModTime().Unix(),
+	}, nil
+}
+
+// CleanLegacyTxtCache walks folder and removes any `*.txt` files
+// nested in subdirectories — those are stale TXT cache outputs from
+// the pre-EPUB design. Top-level `*.txt` files (the source TXTs) are
+// always left alone. Returns the number of files removed.
+//
+// Safe to run on a fresh / already-clean folder: it's a fast no-op
+// when no nested .txt files are present.
+func CleanLegacyTxtCache(folder string) (int, error) {
+	removed := 0
+	err := filepath.WalkDir(folder, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(p), ".txt") {
+			return nil
+		}
+		// Sources live at the top level. Anything deeper is cache.
+		if filepath.Dir(p) == folder {
+			return nil
+		}
+		if err := os.Remove(p); err == nil {
+			removed++
+		}
+		return nil
+	})
+	return removed, err
 }
 
 // RestoreBackups walks the folder for legacy `<file>.txt.bak` files

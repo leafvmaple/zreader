@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/leafvmaple/zreader/internal/library"
@@ -104,13 +103,15 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleBookContent serves a slice of the decoded UTF-8 text. Query:
+// handleBookContent serves a slice of the book's plain-text view.
+// Query:
 //   from (char offset, default 0)
 //   len  (chars to return, default 5000, max 50000)
 //
-// We re-read and re-decode every call. For MVP that is fine: TXT files
-// rarely exceed a few MB and decoding is milliseconds. A future
-// optimisation is to cache decoded content (in memory keyed by mtime).
+// The text is reconstructed from the cached EPUB on the fly via
+// library.GetFlatRunes — its in-process cache amortises the EPUB
+// parse across requests so the per-slice cost is just rune-slice
+// indexing.
 func (s *Server) handleBookContent(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -142,19 +143,12 @@ func (s *Server) handleBookContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	raw, err := os.ReadFile(book.Path)
+	runes, err := library.GetFlatRunes(book.Path)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "read_file", err)
-		return
-	}
-	_, text, err := library.DetectAndDecode(raw)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "decode", err)
+		writeError(w, http.StatusInternalServerError, "read_epub", err)
 		return
 	}
 
-	// Slice by rune index, not byte index — `from` is a character offset.
-	runes := []rune(text)
 	totalChars := int64(len(runes))
 	if int64(from) >= totalChars {
 		writeJSON(w, http.StatusOK, map[string]any{

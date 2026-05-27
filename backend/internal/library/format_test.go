@@ -453,16 +453,16 @@ func TestFormatToCache_LeavesSourceUntouched(t *testing.T) {
 	srcInfo, _ := os.Stat(src)
 	srcMtime := srcInfo.ModTime()
 
-	cp, title, author, err := FormatToCache(tmp, src)
+	cr, err := FormatToCache(tmp, src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != wantTitle || author != wantAuthor {
-		t.Errorf("meta = (%q, %q), want (%q, %q)", title, author, wantTitle, wantAuthor)
+	if cr.Title != wantTitle || cr.Author != wantAuthor {
+		t.Errorf("meta = (%q, %q), want (%q, %q)", cr.Title, cr.Author, wantTitle, wantAuthor)
 	}
-	wantCachedPath := filepath.Join(tmp, wantAuthor, wantTitle+".txt")
-	if cp != wantCachedPath {
-		t.Errorf("cached path = %q, want %q", cp, wantCachedPath)
+	wantCachedPath := filepath.Join(tmp, wantAuthor, wantTitle+".epub")
+	if cr.Path != wantCachedPath {
+		t.Errorf("cached path = %q, want %q", cr.Path, wantCachedPath)
 	}
 
 	// Source bytes + mtime unchanged.
@@ -477,16 +477,17 @@ func TestFormatToCache_LeavesSourceUntouched(t *testing.T) {
 		t.Error("source mtime changed — should be untouched")
 	}
 
-	// Cached file exists and is correctly formatted.
-	cachedBytes, err := os.ReadFile(cp)
+	// Cached EPUB exists and round-trips through ReadEpub with the
+	// expected chapter title + body.
+	book, err := ReadEpub(cr.Path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("read cached epub: %v", err)
 	}
-	if !strings.Contains(string(cachedBytes), "第一章　甲乙丙丁，戊己庚辛") {
-		t.Errorf("cached content missing expected title; got %q", cachedBytes)
+	if !strings.Contains(book.FlatText, "第一章　甲乙丙丁，戊己庚辛") {
+		t.Errorf("cached epub missing expected title; flat text: %q", book.FlatText)
 	}
-	if !strings.Contains(string(cachedBytes), "这是一段") {
-		t.Errorf("cached content missing body; got %q", cachedBytes)
+	if !strings.Contains(book.FlatText, "这是一段") {
+		t.Errorf("cached epub missing body; flat text: %q", book.FlatText)
 	}
 }
 
@@ -496,23 +497,25 @@ func TestFormatToCache_OverwritesOnRerun(t *testing.T) {
 	if err := os.WriteFile(src, []byte("　　hello\n硬包\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cp, _, _, err := FormatToCache(tmp, src)
+	cr, err := FormatToCache(tmp, src)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Tamper with cached output; FormatToCache should overwrite on the
 	// next run (this is the "easy to re-format after bug fix" guarantee).
-	if err := os.WriteFile(cp, []byte("STALE — should be replaced"), 0o644); err != nil {
+	if err := os.WriteFile(cr.Path, []byte("STALE — should be replaced"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, _, err := FormatToCache(tmp, src); err != nil {
+	if _, err := FormatToCache(tmp, src); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := os.ReadFile(cp)
-	if strings.Contains(string(after), "STALE") {
-		t.Errorf("cached file was not overwritten on re-format; got %q", after)
+	// The overwritten file must again be a valid EPUB (ReadEpub
+	// succeeds). The "STALE" content was not a zip, so a successful
+	// ReadEpub is sufficient evidence of overwrite.
+	if _, err := ReadEpub(cr.Path); err != nil {
+		t.Errorf("cached file not overwritten with valid EPUB: %v", err)
 	}
 }
 
@@ -610,19 +613,18 @@ func TestFormatToCache_Corpus(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			cp, _, _, err := FormatToCache(tmp, dst)
+			cr, err := FormatToCache(tmp, dst)
 			if err != nil {
 				t.Fatalf("format: %v", err)
 			}
-			formatted, err := os.ReadFile(cp)
+			// Round-trip through ReadEpub so the corpus assertions
+			// exercise both ends of the pipeline (FormatText →
+			// ParseChapters → BuildEpub → ReadEpub).
+			book, err := ReadEpub(cr.Path)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("read cached epub: %v", err)
 			}
-			_, text, err := DetectAndDecode(formatted)
-			if err != nil {
-				t.Fatalf("decode formatted: %v", err)
-			}
-			chapters := ParseChapters(text, nil)
+			chapters := book.Chapters
 
 			if e.MinChapters > 0 && len(chapters) < e.MinChapters {
 				t.Errorf("post-format chapters = %d, want >= %d", len(chapters), e.MinChapters)
