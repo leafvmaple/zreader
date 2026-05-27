@@ -257,6 +257,9 @@ func FormatText(text string) string {
 				if sub == "" {
 					continue
 				}
+				if isMetadataLine(sub) {
+					continue
+				}
 				if !first {
 					b.WriteString("\n\n")
 				}
@@ -267,6 +270,29 @@ func FormatText(text string) string {
 	}
 	b.WriteByte('\n')
 	return b.String()
+}
+
+// metadataLineMaxRunes caps the length of a paragraph eligible for
+// the metadata-line filter (see isMetadataLine). Real title/author
+// headers are short — capping at 40 runes keeps the filter from
+// stripping a body sentence that happens to contain the substring
+// `by:` (rare in CJK prose but possible in bilingual / translated
+// text). Pick a value comfortably above the longest plausible
+// "<title> by:<author>" header.
+const metadataLineMaxRunes = 40
+
+// isMetadataLine reports whether a trimmed paragraph is a standalone
+// title/author header like `铸蝉记 by:轩辕悬` or `by:轩辕悬` that some
+// web-novel TXTs put between the title page and the first chapter.
+// DetectMetadata already harvests title + author from the same form
+// (against the raw text, before FormatText runs), so dropping the line
+// from the formatted output doesn't lose anything — it just stops the
+// metadata leaking into the reader as a body paragraph.
+func isMetadataLine(paragraph string) bool {
+	if utf8.RuneCountInString(paragraph) > metadataLineMaxRunes {
+		return false
+	}
+	return AuthorByPattern.MatchString(paragraph)
 }
 
 // splitTitleFromBody splits a paragraph that opens with a structured

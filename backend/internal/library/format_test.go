@@ -42,6 +42,47 @@ func TestFormatText_ExtraBlanksNormalised(t *testing.T) {
 	}
 }
 
+func TestFormatText_DropsMetadataHeader(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "title + by:author paragraph dropped",
+			in:   "　　铸蝉记\n\n　　铸蝉记 by:轩辕悬\n\n　　楔子\n\n　　正文第一段。\n",
+			want: "铸蝉记\n\n楔子\n\n正文第一段。\n",
+		},
+		{
+			name: "bare by:author paragraph dropped",
+			in:   "　　铸蝉记\n\n　　by:轩辕悬\n\n　　第一章\n",
+			want: "铸蝉记\n\n第一章\n",
+		},
+		{
+			name: "full-width colon variant dropped",
+			in:   "　　铸蝉记 by：轩辕悬\n\n　　楔子\n",
+			want: "楔子\n",
+		},
+		{
+			name: "long body sentence with by: substring preserved",
+			// > 40 runes — over the cap, so the metadata filter must not
+			// strip it even though the line technically matches
+			// AuthorByPattern (defensive against translated / bilingual
+			// body text that happens to contain `by:`).
+			in:   "　　这是一段足够长的正文段落示例，里面恰巧出现了 by: 这个英文标记片段，但它绝对不应该被当作元数据行而被删除掉。\n",
+			want: "这是一段足够长的正文段落示例，里面恰巧出现了 by: 这个英文标记片段，但它绝对不应该被当作元数据行而被删除掉。\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FormatText(tc.in)
+			if got != tc.want {
+				t.Errorf("FormatText:\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFormatText_TitleSplitsFromBody(t *testing.T) {
 	cases := []struct {
 		name string
