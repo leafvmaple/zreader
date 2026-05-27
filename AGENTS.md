@@ -56,7 +56,7 @@ in the first place — it's much cheaper than scrubbing it later.
 
 ## Layout
 
-```
+```text
 backend/
   cmd/zreader/         entrypoint
   cmd/decodetest/      one-off encoding-detection CLI for debugging
@@ -78,7 +78,7 @@ TODO.md                cross-cutting follow-ups noted during normal work
 This is the most important architectural decision in the codebase. Read
 it before touching anything in `internal/library/`.
 
-```
+```text
 ScanFolder(folder)
   ├─ Phase 0 — RestoreBackups       ← migrate legacy *.txt.bak (one-time
   │                                    leftover from old in-place format)
@@ -108,6 +108,7 @@ fix in `FormatText` takes effect on the next scan with no manual
 intervention.
 
 **The contract `FormatText` enforces for downstream chapter detection:**
+
 - Wrap-only line breaks are removed (paragraphs reconstructed by the
   indented-paragraph convention).
 - Structured chapter markers (`第X章/折/节/回/卷/篇/集/部`, `Chapter N`)
@@ -126,7 +127,7 @@ whole separation.
 
 ### Source vs cached file layout
 
-```
+```text
 books/                              ← scan folder (the docker mount)
   <title-A> - <author-X>.txt        ← source (top-level, untouched)
   <title-B> - <author-X>.txt        ← source (top-level, untouched)
@@ -300,9 +301,20 @@ state batches and async fetches in ways static analysis won't surface.
 Drive the real browser:
 
 ```bash
-# One-time install per agent session that needs it
-cd frontend && pnpm add -D playwright
-pnpm exec playwright install chromium
+# `playwright` is a permanent devDependency — `pnpm install` brings the
+# npm package. The chromium browser binary itself is NOT an npm package;
+# it lives in a per-user cache (Windows:
+# %USERPROFILE%\AppData\Local\ms-playwright\, Linux/mac:
+# ~/.cache/ms-playwright/). One-time install per machine:
+#
+#   pnpm exec playwright install chromium
+#
+# After that, every subsequent probe reuses the cached binary across
+# sessions / reboots — no reinstall needed until the playwright npm
+# version bumps to one that requires a different chromium build. Neither
+# the dev dep nor the cached binary ship in the docker image (the
+# production Dockerfile only copies what `pnpm build` emits, and the
+# per-user playwright cache is outside node_modules entirely).
 
 # probe.mjs — minimal pattern:
 #   - chromium.launch({ headless: true })
@@ -314,8 +326,9 @@ pnpm exec playwright install chromium
 
 node probe.mjs
 
-# Remove playwright + probe.mjs before commit unless the probe
-# becomes a durable, fast regression test.
+# Delete probe.mjs before commit unless it becomes a durable, fast
+# regression test. Leave playwright in devDependencies — removing it
+# just to re-add next session is wasted churn.
 ```
 
 Add `console.log('[zreader] ...', { ... })` temporarily in the suspect

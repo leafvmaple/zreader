@@ -18,6 +18,127 @@ func TestFormatText_IndentedRejoin(t *testing.T) {
 	}
 }
 
+func TestFormatText_VolumeFormNormalised(t *testing.T) {
+	// `卷X[subtitle]` rewritten to `第X卷　[subtitle]`. The trailing
+	// whitespace between marker and Han subtitle collapses to exactly
+	// one full-width `　` (chapterTitleSpacingPattern, same convention
+	// as 章/折).
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "卷X glued to Han subtitle",
+			in:   "　　卷四十甲乙丙丁\n\n　　正文段落一。\n",
+			want: "第四十卷　甲乙丙丁\n\n正文段落一。\n",
+		},
+		{
+			name: "卷X with existing space",
+			in:   "　　卷三　戊己庚辛\n\n　　正文。\n",
+			want: "第三卷　戊己庚辛\n\n正文。\n",
+		},
+		{
+			name: "bare 卷X no subtitle",
+			in:   "　　卷二\n\n　　正文。\n",
+			want: "第二卷\n\n正文。\n",
+		},
+		{
+			name: "卷 inside body sentence — not touched",
+			in:   "　　他翻到下一卷的目录页查看。\n",
+			want: "他翻到下一卷的目录页查看。\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FormatText(tc.in, "", "")
+			if got != tc.want {
+				t.Errorf("FormatText:\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatText_StripsHTMLTags(t *testing.T) {
+	// Inline rich-text markup that some scraped TXTs embed (<center>,
+	// <img src=…>, <br>, …) gets stripped. Paragraphs that become empty
+	// after the strip are dropped entirely.
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "standalone HTML-only paragraph dropped",
+			in:   "　　正文一。\n\n　　<center><img src=../img/x.jpg></center>\n\n　　正文二。\n",
+			want: "正文一。\n\n正文二。\n",
+		},
+		{
+			name: "inline HTML in body kept-prose",
+			in:   "　　他望着画卷<img src=../img/y.jpg>沉默良久。\n",
+			want: "他望着画卷沉默良久。\n",
+		},
+		{
+			name: "broken HTML with no inner space",
+			in:   "　　<center><imgsrc=../txt/40.jpg></center>\n\n　　继续。\n",
+			want: "继续。\n",
+		},
+		{
+			name: "leaves text containing < without > untouched",
+			in:   "　　数学符号 a < b 在书里出现过。\n",
+			want: "数学符号 a < b 在书里出现过。\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FormatText(tc.in, "", "")
+			if got != tc.want {
+				t.Errorf("FormatText:\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatText_OneLinePerParagraph_NoBlanks(t *testing.T) {
+	// Some files use the "every line is one paragraph, all indented,
+	// no blank-line gaps" convention — a bare title on line 1 followed
+	// by `　　…` paragraphs. The format pipeline must still run (drop
+	// the title metadata line, normalise chapter title spacing, etc.)
+	// instead of returning the file unchanged.
+	in := "TTT\n" +
+		"　　第一折甲乙丙丁，戊己庚辛\n" +
+		"　　子丑寅卯辰巳午未申酉\n" +
+		"　　东南西北春夏秋冬。\n"
+	want := "第一折　甲乙丙丁，戊己庚辛\n\n" +
+		"子丑寅卯辰巳午未申酉\n\n" +
+		"东南西北春夏秋冬。\n"
+	got := FormatText(in, "TTT", "AAA")
+	if got != want {
+		t.Errorf("FormatText:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestFormatText_NoIndentButSentenceTerminators(t *testing.T) {
+	// One-line-per-paragraph layout: no indent, no blank-line gaps,
+	// but every line ends with a sentence terminator. Format pipeline
+	// should still kick in so per-paragraph transforms (HTML strip,
+	// metadata drop, chapter spacing) get to run, and emit each line
+	// as its own paragraph separated by `\n\n`.
+	in := "TTT作者：AAA\n" +
+		"楔　子\n" +
+		"甲乙丙丁戊己庚辛壬癸。\n" +
+		"子丑寅卯辰巳午未申酉戌亥。\n" +
+		"东南西北春夏秋冬。\n"
+	want := "楔　子\n\n" +
+		"甲乙丙丁戊己庚辛壬癸。\n\n" +
+		"子丑寅卯辰巳午未申酉戌亥。\n\n" +
+		"东南西北春夏秋冬。\n"
+	got := FormatText(in, "TTT", "AAA")
+	if got != want {
+		t.Errorf("FormatText:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestFormatText_NoIndentConvention_NoOp(t *testing.T) {
 	// Without indented paragraph starts we can't distinguish wrap from
 	// real breaks — return text unchanged.
@@ -116,6 +237,68 @@ func TestFormatText_DropsMetadataHeader(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := FormatText(tc.in, title, author)
+			if got != tc.want {
+				t.Errorf("FormatText:\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatText_EnumeratedTitleSplitsFromBody(t *testing.T) {
+	// `<numeral>、<symmetric-subtitle>` glued to body — same shape as
+	// the existing 第X章 splitter, just with `、` instead of the章/折
+	// marker character. The asymmetric 3+5 / 4+3 limitation
+	// documented for the structured form applies equally here.
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "<numeral>、 + 4+4 subtitle glued to body",
+			in:   "　　三十一、甲乙丙丁，戊己庚辛主角醒了过来。\n",
+			want: "三十一、甲乙丙丁，戊己庚辛\n\n主角醒了过来。\n",
+		},
+		{
+			name: "<numeral>、 + 3+3 subtitle glued to body",
+			in:   "　　二、甲乙丙，戊己庚某天下午发生的事。\n",
+			want: "二、甲乙丙，戊己庚\n\n某天下午发生的事。\n",
+		},
+		{
+			name: "<numeral>、 + 5+5 subtitle glued to body",
+			in:   "　　12、子丑寅卯辰，巳午未申酉接下来的故事。\n",
+			want: "12、子丑寅卯辰，巳午未申酉\n\n接下来的故事。\n",
+		},
+		{
+			// Mirrors the 4+3 over-split documented for the structured
+			// form: 3+5 falls back to a greedy 3+3 split, stealing two
+			// chars from the body. Chapter detection still succeeds
+			// (the truncated title matches EnumeratedNumeralPattern),
+			// just with a slightly corrupted title — worth accepting
+			// to avoid losing the chapter entry entirely.
+			name: "<numeral>、 + asymmetric 3+5 — over-splits as 3+3 (known)",
+			in:   "　　二十、甲乙丙，丁戊己庚辛后续的正文文本。\n",
+			want: "二十、甲乙丙，丁戊己\n\n庚辛后续的正文文本。\n",
+		},
+		{
+			name: "standalone <numeral>、subtitle — unchanged",
+			in:   "　　一、甲乙丙\n",
+			want: "一、甲乙丙\n",
+		},
+		{
+			// User edits the source to put a 3+5-shaped title on its
+			// own line. Without the body-tail threshold the symmetric
+			// 3+3 arm would still greedily match the prefix and orphan
+			// the last 2 runes as a separate paragraph — re-introducing
+			// the over-split the manual fix was meant to undo.
+			name: "standalone <numeral>、 + 3+5 subtitle — short tail preserves whole title",
+			in:   "　　二十、甲乙丙，丁戊己庚辛\n",
+			want: "二十、甲乙丙，丁戊己庚辛\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FormatText(tc.in, "", "")
 			if got != tc.want {
 				t.Errorf("FormatText:\n got %q\nwant %q", got, tc.want)
 			}

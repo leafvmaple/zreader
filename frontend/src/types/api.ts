@@ -28,6 +28,10 @@ export type Book = {
 export type Chapter = {
   idx: number;
   title: string;
+  // 0 = 卷 / volume header, 1 = 章 / 折 / etc. The list is flat and
+  // ordered by offset; the TOC renderer groups level=1 entries under
+  // the most recent level=0 entry.
+  level: number;
   char_offset: number;
 };
 

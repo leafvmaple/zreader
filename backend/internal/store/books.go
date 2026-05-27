@@ -26,11 +26,16 @@ type Book struct {
 }
 
 // Chapter is one row in the chapters table.
+//
+// Level mirrors library.Chapter.Level: 0 = 卷 / volume header, 1 = 章
+// / 折 / etc. The flat list is kept ordered by ByteOffset; the
+// frontend nests level=1 entries under the most recent level=0 entry.
 type Chapter struct {
 	ID         int64
 	BookID     int64
 	Idx        int64
 	Title      string
+	Level      int64
 	ByteOffset int64
 	CharOffset int64
 }
@@ -105,14 +110,14 @@ func (s *Store) ReplaceChapters(ctx context.Context, bookID int64, chapters []Ch
 	}
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO chapters(book_id, idx, title, byte_offset, char_offset) VALUES (?, ?, ?, ?, ?)`)
+		`INSERT INTO chapters(book_id, idx, title, level, byte_offset, char_offset) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, c := range chapters {
-		if _, err := stmt.ExecContext(ctx, bookID, c.Idx, c.Title, c.ByteOffset, c.CharOffset); err != nil {
+		if _, err := stmt.ExecContext(ctx, bookID, c.Idx, c.Title, c.Level, c.ByteOffset, c.CharOffset); err != nil {
 			return fmt.Errorf("insert chapter %d: %w", c.Idx, err)
 		}
 	}
@@ -176,7 +181,7 @@ func (s *Store) GetBook(ctx context.Context, id int64) (Book, error) {
 // LoadChapters returns chapters of a book ordered by idx ascending.
 func (s *Store) LoadChapters(ctx context.Context, bookID int64) ([]Chapter, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, book_id, idx, title, byte_offset, char_offset
+		`SELECT id, book_id, idx, title, level, byte_offset, char_offset
          FROM chapters WHERE book_id = ? ORDER BY idx ASC`, bookID)
 	if err != nil {
 		return nil, err
@@ -185,7 +190,7 @@ func (s *Store) LoadChapters(ctx context.Context, bookID int64) ([]Chapter, erro
 	var out []Chapter
 	for rows.Next() {
 		var c Chapter
-		if err := rows.Scan(&c.ID, &c.BookID, &c.Idx, &c.Title, &c.ByteOffset, &c.CharOffset); err != nil {
+		if err := rows.Scan(&c.ID, &c.BookID, &c.Idx, &c.Title, &c.Level, &c.ByteOffset, &c.CharOffset); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

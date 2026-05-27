@@ -30,6 +30,7 @@ type bookDTO struct {
 type chapterDTO struct {
 	Idx        int64  `json:"idx"`
 	Title      string `json:"title"`
+	Level      int64  `json:"level"`
 	CharOffset int64  `json:"char_offset"`
 }
 
@@ -95,7 +96,7 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 	}
 	cdtos := make([]chapterDTO, 0, len(chapters))
 	for _, c := range chapters {
-		cdtos = append(cdtos, chapterDTO{Idx: c.Idx, Title: c.Title, CharOffset: c.CharOffset})
+		cdtos = append(cdtos, chapterDTO{Idx: c.Idx, Title: c.Title, Level: c.Level, CharOffset: c.CharOffset})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"book":     toBookDTO(book),

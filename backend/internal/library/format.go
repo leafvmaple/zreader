@@ -1,5 +1,34 @@
 package library
 
+// Source-to-canonical text normalisation.
+//
+// FormatText turns whatever a TXT happens to look like into a canonical
+// form ParseChapters (txt.go) can match against with simple line-anchored
+// regexes. Without this step, parsing would need sub-line lookarounds
+// for every "messy source" case.
+//
+// Transforms applied (per paragraph, in order):
+//
+//   1. buildLogicalLines    — collapse wrap-only line breaks into one
+//                              paragraph per logical block (see
+//                              usesIndentedParagraphs for the heuristic).
+//   2. splitAtChapters      — promote chapter markers found glued mid-
+//                              paragraph onto their own paragraph
+//                              (chapterSplitPattern).
+//   3. splitTitleFromBody   — peel a chapter title off a glued first
+//                              body sentence (titleBodySplitPattern).
+//   4. TrimSpace            — flush every paragraph left.
+//   5. htmlTagPattern       — strip stray <…> markup (drop the
+//                              paragraph if nothing's left).
+//   6. volumeFormNormalize  — rewrite `卷X` → `第X卷` so VolumePattern
+//                              parses both forms uniformly.
+//   7. chapterTitleSpacing  — normalise whitespace between marker and
+//                              Han subtitle to exactly one `　`.
+//   8. isMetadataLine       — drop title-only / author-only / by:author
+//                              / 作者：author paragraphs.
+//
+// Regex primitives shared with txt.go live in patterns.go.
+
 import (
 	"fmt"
 	"io/fs"
@@ -160,9 +189,9 @@ func RestoreBackups(folder string) (int, error) {
 // paragraph without any terminal punctuation. The vocabulary mirrors
 // ChapterPattern / BracketedNumeralPattern in txt.go.
 var chapterSplitPattern = regexp.MustCompile(
-	`第\s*[\d零一二三四五六七八九十百千万0-9]+\s*[章节回卷篇集部折]` +
+	`第\s*` + chapterNumeral + `+\s*` + anyStructuredUnit +
 		`|Chapter\s+\d+|CHAPTER\s+\d+` +
-		`|[「『【〈\[]\s*[零〇一二三四五六七八九十百千万0-9]+\s*[」』】〉\]]`,
+		`|` + bracketedNumeralBody,
 )
 
 // chapterTitleSpacingPattern normalises the whitespace between a Chinese
@@ -172,8 +201,36 @@ var chapterSplitPattern = regexp.MustCompile(
 // marker stands alone, when it's followed by `（X）` directly (e.g.
 // `第九折（上）` — no subtitle), or when the line isn't a chapter title.
 var chapterTitleSpacingPattern = regexp.MustCompile(
-	`^([\s\p{Zs}]*第\s*[\d零一二三四五六七八九十百千万0-9]+\s*[章节回卷篇集部折])[\s\p{Zs}]*(\p{Han})`,
+	`^([\s\p{Zs}]*第\s*` + chapterNumeral + `+\s*` + anyStructuredUnit + `)[\s\p{Zs}]*(\p{Han})`,
 )
+
+// volumeFormNormalizePattern rewrites bare-form volume markers
+// (`卷X[subtitle]`) into the canonical `第X卷[subtitle]` form. Only the
+// marker prefix is touched — any subtitle that follows is left in
+// place and gets its whitespace tightened by chapterTitleSpacingPattern
+// on the next pass. Anchored at line start (after optional indent) so
+// `卷` inside body sentences ("...翻到下一卷的...") is never touched.
+//
+// Captures: 1 = leading whitespace (preserved), 2 = the numeric index.
+var volumeFormNormalizePattern = regexp.MustCompile(
+	`^([\s\p{Zs}]*)卷\s*(` + chapterNumeral + `+)`,
+)
+
+// htmlTagPattern matches a single-line `<…>` token. Used to strip
+// stray rich-text markup that some scraped TXTs embed inline:
+// `<center>`, `<img src=…>`, `<br>`, `<font color=…>`, `</p>`, etc. We
+// don't try to be HTML-aware — the goal is to delete the markup
+// without taking surrounding prose with it, and a single-line greedy
+// match on `<…>` does exactly that.
+//
+// Cross-line tags are not matched in one go, but the per-paragraph
+// loop joins continuation lines first (see buildLogicalLines), so a
+// `<center>\n<img …>\n</center>` block survives as `<center><img …>
+// </center>` on one joined line and all three tags strip together.
+//
+// Lines that become empty after stripping are dropped by the surrounding
+// FormatText loop's `sub == ""` guard.
+var htmlTagPattern = regexp.MustCompile(`<[^<>\r\n]*>`)
 
 // titleBodySplitPattern matches a structured chapter title that opens a
 // paragraph and is immediately followed by body text on the same line
@@ -182,29 +239,37 @@ var chapterTitleSpacingPattern = regexp.MustCompile(
 // also accepted; asymmetric subtitles (4+3 etc.) are intentionally
 // rejected because splitting them risks stealing one char from the body.
 //
-// An optional parenthesised part marker like "（上）"/"（下）" extends the
-// captured title when present.
+// Three marker shapes are recognised:
+//   - `第X章/折/…` + symmetric subtitle + optional `（上）` part marker
+//   - bracketed numeral like `「一」` standing alone
+//   - `<numeral>、` + symmetric subtitle (e.g. `三十一、甲乙丙丁，戊己庚辛`
+//     glued to body); no part marker on this arm — short-story / essay
+//     books that use the enumeration form don't tend to split a single
+//     chapter across multiple parts.
 //
-// What this DELIBERATELY does NOT cover (= title stays glued to body
-// after format, parser still captures it via ChapterPattern's 10-char
-// cap, but the file isn't split):
-//   - Single-phrase subtitles (no `，`)
-//   - Asymmetric subtitles like 4+3 or 5+4
+// What this DELIBERATELY does NOT cover cleanly:
+//   - Single-phrase subtitles with no `，` — stay glued, parser still
+//     captures via ChapterPattern's 10-char cap.
+//   - Asymmetric subtitles like 4+3 / 5+4 / 3+5 — fall back to a greedy
+//     symmetric arm and over-split (e.g. 3+5 takes the 3+3 prefix),
+//     stealing 1–2 chars from the body. Chapter detection still
+//     succeeds with a slightly corrupted title — preferred over losing
+//     the chapter entry entirely.
 //   - Subtitles whose body continuation also happens to start with
 //     `XXXX，` (rhythmic 4-char prose) — we may over-split here; this
 //     is a known limitation of structure-without-semantics matching.
 var titleBodySplitPattern = regexp.MustCompile(
 	`^[\s\p{Zs}]*` +
 		`(?:` +
-		`第\s*[\d零一二三四五六七八九十百千万0-9]+\s*[章节回卷篇集部折]` +
-		`[\s\p{Zs}]*` +
-		`(?:` +
-		`[\p{Han}]{4}，[\p{Han}]{4}` +
-		`|[\p{Han}]{5}，[\p{Han}]{5}` +
-		`|[\p{Han}]{3}，[\p{Han}]{3}` +
-		`)` +
-		`(?:（[^）\r\n]{1,6}）)?` +
-		`|[「『【〈\[]\s*[零〇一二三四五六七八九十百千万0-9]+\s*[」』】〉\]]` +
+		// `第X章/折/...` + symmetric Han subtitle + optional part marker.
+		`第\s*` + chapterNumeral + `+\s*` + anyStructuredUnit +
+		`[\s\p{Zs}]*` + symmetricHanSubtitle + `(?:（[^）\r\n]{1,6}）)?` +
+		// Bracketed numeral standing alone (whole-line marker).
+		`|` + bracketedNumeralBody +
+		// `<numeral>、` + symmetric Han subtitle (no part marker — short-
+		// story / essay collections that use this form don't split a
+		// single chapter across multiple parts).
+		`|` + chapterNumeral + `{1,4}\s*、\s*` + symmetricHanSubtitle +
 		`)`,
 )
 
@@ -238,7 +303,16 @@ var chapterSplitPrecedes = map[rune]struct{}{
 // disable the metadata-line filter — useful for tests that exercise
 // the format pipeline in isolation.
 func FormatText(text, title, author string) string {
-	if !usesIndentedParagraphs(text) {
+	// Run the pipeline when EITHER paragraph signal is present:
+	//   - indented-paragraph convention (every paragraph starts with
+	//     `　　` or similar; the common shape for novel-length TXTs)
+	//   - one-line-per-paragraph convention via sentence terminators
+	//     (centred-header / no-blank / no-indent layouts often used
+	//     by personal-essay TXTs)
+	// When neither holds, we genuinely can't tell wrap from paragraph
+	// break and leave the text alone — running the pipeline would
+	// shatter wrap-only prose into one-line-per-wrap-segment fragments.
+	if !usesIndentedParagraphs(text) && !linesEndWithSentenceTerminator(text) {
 		return text
 	}
 	paragraphs := buildLogicalLines(text)
@@ -258,6 +332,9 @@ func FormatText(text, title, author string) string {
 				// `　　` only complicates uniform handling — title lines
 				// shouldn't be indented anyway.
 				sub = strings.TrimSpace(sub)
+				sub = htmlTagPattern.ReplaceAllString(sub, "")
+				sub = strings.TrimSpace(sub)
+				sub = volumeFormNormalizePattern.ReplaceAllString(sub, "${1}第${2}卷")
 				sub = chapterTitleSpacingPattern.ReplaceAllString(sub, "${1}　${2}")
 				if sub == "" {
 					continue
@@ -359,9 +436,41 @@ func isMetadataLine(paragraph, title, author string) bool {
 // the title's end. When the paragraph either doesn't start with a
 // chapter title, doesn't fit the symmetric subtitle form, or contains
 // nothing after the title, the paragraph is returned unchanged.
+// minBodyTailRunes is the smallest plausible body remainder after a
+// title-end match. The symmetric subtitle arms (3+3 / 4+4 / 5+5) in
+// titleBodySplitPattern occasionally match a strict PREFIX of an
+// asymmetric real title — e.g. 3+3 fires inside a true 3+5 subtitle
+// — and orphan the last 1-2 chars as a fake "body" paragraph. Any
+// real body sentence is several characters longer than that, so
+// requiring the tail to clear this threshold rejects the over-split
+// without losing legitimate glued-body splits in test/real data.
+const minBodyTailRunes = 3
+
+// splitTitleFromBody peels a chapter title off a glued first body
+// sentence. titleBodySplitPattern finds the title's end; anything
+// before goes out as the title, anything after as the body.
+//
+// Two guards keep us from splitting a paragraph that's actually a
+// standalone title rather than title+body glued:
+//
+//   - The match consumes the whole paragraph (`loc[1] >= len(paragraph)`).
+//     Common case: clean standalone title with no body — the regex
+//     matched it cleanly to the end.
+//   - The match consumes only a prefix and the tail is implausibly
+//     short (< minBodyTailRunes). This catches the symmetric-arm
+//     over-split on asymmetric subtitles, where the "body" is just
+//     1-2 stray chars of title remainder.
+//
+// What this gives up: glued paragraphs whose body is fewer than
+// minBodyTailRunes characters won't split. Bodies that short don't
+// occur in practice (a real first sentence is 10+ runes), so the
+// trade-off is in our favour.
 func splitTitleFromBody(paragraph string) []string {
 	loc := titleBodySplitPattern.FindStringIndex(paragraph)
 	if loc == nil || loc[1] >= len(paragraph) {
+		return []string{paragraph}
+	}
+	if utf8.RuneCountInString(paragraph[loc[1]:]) < minBodyTailRunes {
 		return []string{paragraph}
 	}
 	return []string{paragraph[:loc[1]], paragraph[loc[1]:]}
@@ -509,17 +618,84 @@ func buildLogicalLines(text string) []logicalLine {
 	return out
 }
 
+// linesEndWithSentenceTerminator reports whether most non-empty lines
+// in the first ~50 lines of the file end with a sentence-ending
+// punctuation mark — Chinese `。！？…` plus a few closing forms that
+// occur at the very end of a paragraph (`」』”』 ）` etc.) and the
+// ASCII equivalents. The signal distinguishes two no-blank-line,
+// no-indent layouts that look identical at the line level:
+//
+//   - Wrap-only: a single long paragraph hard-wrapped at fixed
+//     columns. Most lines end mid-sentence (on a CJK char or a
+//     non-terminator comma).
+//   - One-line-per-paragraph: each physical line is a complete
+//     paragraph in its own right. Lines end with sentence-final
+//     punctuation by definition.
+//
+// Used by FormatText as a fallback gate: when usesIndentedParagraphs
+// fails but this returns true, we still want to run the format
+// pipeline so per-paragraph transforms (HTML strip, metadata-line
+// drop, chapter-title spacing, …) get a chance. Without this signal
+// FormatText would have to either always run (breaking wrap-only
+// files) or never run on no-indent input (the bug that motivated
+// adding this helper).
+func linesEndWithSentenceTerminator(text string) bool {
+	const sampleLimit = 50
+	// CJK terminators + ASCII + a couple of closing forms that
+	// typically end the LAST line of a dialog/exclamation paragraph.
+	const terminators = "。！？…」』”’）.!?)"
+	nonEmpty, terminated := 0, 0
+	rest := text
+	for nonEmpty < sampleLimit {
+		nl := strings.IndexByte(rest, '\n')
+		var line string
+		if nl < 0 {
+			line = rest
+		} else {
+			line = rest[:nl]
+		}
+		content := strings.TrimRight(strings.TrimRight(line, "\r"), " \t　")
+		if content != "" {
+			nonEmpty++
+			r, _ := utf8.DecodeLastRuneInString(content)
+			if strings.ContainsRune(terminators, r) {
+				terminated++
+			}
+		}
+		if nl < 0 {
+			break
+		}
+		rest = rest[nl+1:]
+	}
+	return nonEmpty > 0 && terminated*2 > nonEmpty
+}
+
 // usesIndentedParagraphs returns true if most paragraph-starting lines
-// (non-empty lines immediately following an empty line, plus the first
-// non-empty line in the file) begin with whitespace. We sample up to 100
-// such starts — counting all non-empty lines would skew toward "no
-// indent" on wrap-heavy files where continuation lines outnumber starts.
+// begin with whitespace. Two conventions are recognised:
+//
+//   - Blank-line separated: paragraphs are split by empty lines, possibly
+//     with wrap-only continuation lines in between. "Starts" are the
+//     first non-empty line plus every non-empty line immediately
+//     following an empty line. The indent ratio over starts is the right
+//     signal — continuations may or may not be indented.
+//
+//   - One-line-per-paragraph: every non-empty line is itself a paragraph
+//     (no wrap, no internal blanks). When no blank line appears between
+//     two non-empty lines in the sample we fall back to counting every
+//     non-empty line — otherwise a file of indented single-line
+//     paragraphs reports as "not indented" just because its first line
+//     (often a bare book title) lacks the indent prefix.
+//
+// We sample up to 100 of either metric, whichever fills first.
 func usesIndentedParagraphs(text string) bool {
 	const sampleLimit = 100
-	starts, indented := 0, 0
+	starts, startsIndented := 0, 0
+	allLines, allIndented := 0, 0
 	prevEmpty := true
+	sawInternalBlank := false
+	seenContent := false
 	rest := text
-	for starts < sampleLimit {
+	for allLines < sampleLimit && starts < sampleLimit {
 		nl := strings.IndexByte(rest, '\n')
 		var line string
 		if nl < 0 {
@@ -529,14 +705,25 @@ func usesIndentedParagraphs(text string) bool {
 		}
 		content := strings.TrimRight(line, "\r")
 		if content == "" {
-			prevEmpty = true
+			if seenContent {
+				prevEmpty = true
+			}
 		} else {
+			indent := startsWithIndent(content)
+			allLines++
+			if indent {
+				allIndented++
+			}
 			if prevEmpty {
+				if seenContent {
+					sawInternalBlank = true
+				}
 				starts++
-				if startsWithIndent(content) {
-					indented++
+				if indent {
+					startsIndented++
 				}
 			}
+			seenContent = true
 			prevEmpty = false
 		}
 		if nl < 0 {
@@ -544,7 +731,10 @@ func usesIndentedParagraphs(text string) bool {
 		}
 		rest = rest[nl+1:]
 	}
-	return starts > 0 && indented*2 > starts
+	if sawInternalBlank {
+		return starts > 0 && startsIndented*2 > starts
+	}
+	return allLines > 0 && allIndented*2 > allLines
 }
 
 func startsWithIndent(s string) bool {

@@ -76,12 +76,163 @@ func TestParseChapters_BracketedNotInsideDialog(t *testing.T) {
 	}
 }
 
+func TestParseChapters_NamedChapterWithEmbeddedSpace(t *testing.T) {
+	// Scraped TXTs sometimes centre named-chapter headers visually by
+	// putting a full-width space inside the word — `楔　子`, `序　章`.
+	// NamedChapterPattern must still match.
+	cases := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"楔　子 with full-width space", "楔　子\n正文。\n", "楔　子"},
+		{"序 章 with ASCII space", "序 章\n正文。\n", "序 章"},
+		{"楔子 no space — still matches", "楔子\n正文。\n", "楔子"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := ParseChapters(tc.text, nil)
+			if len(out) != 1 {
+				t.Fatalf("want 1 chapter, got %d: %+v", len(out), out)
+			}
+			if out[0].Title != tc.want {
+				t.Errorf("title=%q, want %q", out[0].Title, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseChapters_LooseAloneNotEnough(t *testing.T) {
 	// Single bare digit on its own — below loose threshold, should fall through to synthetic.
 	text := "some prose\n\n7\n\nmore prose\n"
 	out := ParseChapters(text, nil)
 	if len(out) != 1 || out[0].Title != "正文" {
 		t.Fatalf("want synthetic, got %+v", out)
+	}
+}
+
+func TestParseChapters_VolumesWithChapters(t *testing.T) {
+	// Two volumes with two chapters each. Volume markers must come out at
+	// level=0 and chapter markers at level=1, all flat-ordered by offset.
+	// Synthetic CJK placeholders only — no corpus content.
+	text := "第一卷　甲乙丙丁\n\n" +
+		"第一章　子丑寅卯\n正文一。\n\n" +
+		"第二章　辰巳午未\n正文二。\n\n" +
+		"第二卷　戊己庚辛\n\n" +
+		"第三章　申酉戌亥\n正文三。\n\n" +
+		"第四章　春夏秋冬\n正文四。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 6 {
+		t.Fatalf("want 6 entries (2 vols + 4 chaps), got %d: %+v", len(out), out)
+	}
+	wantLevels := []int{0, 1, 1, 0, 1, 1}
+	for i, c := range out {
+		if c.Level != wantLevels[i] {
+			t.Errorf("entry %d (%q): level=%d, want %d", i, c.Title, c.Level, wantLevels[i])
+		}
+		if c.Idx != i+1 {
+			t.Errorf("entry %d: Idx=%d, want %d", i, c.Idx, i+1)
+		}
+	}
+}
+
+func TestParseChapters_ChaptersBeforeFirstVolume(t *testing.T) {
+	// Some books begin with chapters because the author hadn't
+	// introduced volumes yet; the first explicit 卷 marker appears
+	// only part way through the book.
+	// Parser must emit chapters in document order — the missing 第一卷
+	// is a frontend rendering concern, not a parser concern. We assert
+	// no synthetic level=0 leak from the parser.
+	text := "第一章　甲乙丙丁\n正文。\n\n" +
+		"第二章　子丑寅卯\n正文。\n\n" +
+		"第二卷　戊己庚辛\n\n" +
+		"第三章　申酉戌亥\n正文。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 4 {
+		t.Fatalf("want 4, got %d: %+v", len(out), out)
+	}
+	if out[0].Level != 1 || out[1].Level != 1 {
+		t.Errorf("pre-volume chapters should be level=1; got %+v, %+v", out[0], out[1])
+	}
+	if out[2].Level != 0 {
+		t.Errorf("volume marker should be level=0; got %+v", out[2])
+	}
+	if out[3].Level != 1 {
+		t.Errorf("post-volume chapter should be level=1; got %+v", out[3])
+	}
+}
+
+func TestParseChapters_VolumeFormVariants(t *testing.T) {
+	// Both `第X卷` and `卷X` standalone forms should be detected.
+	cases := []struct {
+		name  string
+		text  string
+		title string
+	}{
+		{"第X卷 with subtitle", "第一卷　甲乙丙丁\n\n第一章　起\n正文\n", "第一卷　甲乙丙丁"},
+		{"第X卷 bare", "第二卷\n\n第一章　起\n正文\n", "第二卷"},
+		{"卷X form", "卷三　戊己庚辛\n\n第一章　起\n正文\n", "卷三　戊己庚辛"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := ParseChapters(tc.text, nil)
+			if len(out) < 1 {
+				t.Fatalf("no matches: %+v", out)
+			}
+			if out[0].Level != 0 {
+				t.Errorf("first entry should be volume (level=0), got level=%d", out[0].Level)
+			}
+			if out[0].Title != tc.title {
+				t.Errorf("title=%q, want %q", out[0].Title, tc.title)
+			}
+		})
+	}
+}
+
+func TestParseChapters_EnumeratedNumerals(t *testing.T) {
+	// `<numeral>、<subtitle>` form used by personal essays + short-story
+	// collections. Synthetic CJK placeholders only — no corpus content.
+	text := "TTT\n\n作者：AAA\n\n" +
+		"一、甲乙丙\n　　正文一段。\n\n" +
+		"二、丁戊己\n　　正文二段。\n\n" +
+		"三、庚辛壬\n　　正文三段。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 3 {
+		t.Fatalf("want 3 enumerated chapters, got %d: %+v", len(out), out)
+	}
+	wantTitles := []string{"一、甲乙丙", "二、丁戊己", "三、庚辛壬"}
+	for i, c := range out {
+		if c.Title != wantTitles[i] {
+			t.Errorf("idx %d: title=%q, want %q", i, c.Title, wantTitles[i])
+		}
+		if c.Level != 1 {
+			t.Errorf("idx %d: level=%d, want 1", i, c.Level)
+		}
+	}
+}
+
+func TestParseChapters_EnumeratedNotInsideBody(t *testing.T) {
+	// `一、` appearing inline in a body sentence (e.g. an inline
+	// enumeration "理由有三：一、…二、…") must NOT match — pattern is
+	// whole-line anchored.
+	text := "一、起头\n　　正文。\n\n" +
+		"　　理由有三：一、子曰；二、孟曰；三、荀曰。\n\n" +
+		"二、结尾\n　　正文。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 2 {
+		t.Fatalf("want 2 (inline enumeration ignored), got %d: %+v", len(out), out)
+	}
+}
+
+func TestParseChapters_VolumeNotInsideBody(t *testing.T) {
+	// "...第二卷..." mentioned inside a body paragraph must NOT match
+	// VolumePattern — the pattern is whole-line anchored.
+	text := "第一章　甲乙丙丁\n他翻到第二卷的目录页查看。\n继续阅读第三卷里的内容。\n第二章　子丑寅卯\n正文\n"
+	out := ParseChapters(text, nil)
+	for _, c := range out {
+		if c.Level == 0 {
+			t.Errorf("volume false-positive inside body: %+v", c)
+		}
 	}
 }
 
@@ -100,6 +251,18 @@ func TestDetectMetadata(t *testing.T) {
 		{"by inside word — not matched", "Tobyrules:notanauthor\n", "", ""},
 		{"only scans top of file", strings.Repeat("filler\n", 100) + "by: 太晚了\n", "", ""},
 		{"title with extra whitespace gets trimmed", "  奇书   by:  无名  \n", "奇书", "无名"},
+		{"Chinese 作者 standalone — author only (title from filename later)",
+			"书名甲\n\n作者：作者乙\n\n一、起\n正文\n", "", "作者乙"},
+		{"Chinese 作者 with full-width colon", "作者：作者丙\n", "", "作者丙"},
+		{"Chinese 作者 with ASCII colon + spaces", "作者: 作者丁\n", "", "作者丁"},
+		{"Chinese 作者 inline with title prefix",
+			"书名甲作者：作者乙\n", "书名甲", "作者乙"},
+		{"Chinese 作者 inline + leading centring whitespace",
+			"　　　　　　书名丙作者：作者丁\n", "书名丙", "作者丁"},
+		{"作者 with trailing prose — author capture rejected by length cap",
+			"作者：AAA加上更多文字补足长度\n", "", ""},
+		{"by: takes precedence over 作者 (same scan)",
+			"标题甲 by:作者甲\n\n作者：另一人\n", "标题甲", "作者甲"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver, no CGO needed
@@ -43,6 +44,15 @@ func Open(dataDir string) (*Store, error) {
 	if _, err := db.ExecContext(context.Background(), schemaSQL); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	// Idempotent column add for DBs created before chapters.level existed.
+	// CREATE TABLE IF NOT EXISTS in schema.sql only covers fresh installs;
+	// existing DBs need ALTER. SQLite has no IF NOT EXISTS for ADD COLUMN,
+	// so we run it and swallow the "duplicate column" error.
+	if _, err := db.Exec(`ALTER TABLE chapters ADD COLUMN level INTEGER NOT NULL DEFAULT 1`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		_ = db.Close()
+		return nil, fmt.Errorf("add chapters.level: %w", err)
 	}
 	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version(version) VALUES (1)`); err != nil {
 		_ = db.Close()

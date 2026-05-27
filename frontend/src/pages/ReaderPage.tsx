@@ -97,6 +97,79 @@ function chapterIdxAtOffset(offset: number, chapters: Chapter[]): number {
 // plus paragraph nodes. The backend's format pass emits chapters as
 // `<title>\n\n<para>\n\n<para>…`, so the first paragraph (split on blank
 // lines, trimmed) is the title.
+// groupTOC walks the flat chapter list and emits sections grouped by
+// volume. A volume header (level=0) starts a new section; chapters
+// (level=1) attach to the most recent section. If the first entries are
+// chapters with at least one volume marker later in the list, they're
+// placed under an implicit "第一卷" section — covers books
+// where the author introduced volumes mid-book and the first half has
+// no explicit 卷 marker. When no volume markers exist anywhere, a
+// single header-less section holds the whole flat list (don't impose a
+// fake hierarchy on books that don't use one).
+type TOCSection = { volume: Chapter | null; chapters: Chapter[] };
+
+function groupTOC(chapters: Chapter[]): { sections: TOCSection[]; hasAnyVolume: boolean } {
+  const sections: TOCSection[] = [];
+  const hasAnyVolume = chapters.some((c) => c.level === 0);
+  let current: TOCSection | null = null;
+  for (const c of chapters) {
+    if (c.level === 0) {
+      current = { volume: c, chapters: [] };
+      sections.push(current);
+    } else {
+      if (!current) {
+        current = { volume: null, chapters: [] };
+        sections.push(current);
+      }
+      current.chapters.push(c);
+    }
+  }
+  return { sections, hasAnyVolume };
+}
+
+function TOCList({
+  chapters,
+  currentChapter,
+  onJump,
+}: {
+  chapters: Chapter[];
+  currentChapter: number;
+  onJump: (idx: number) => void;
+}): React.ReactNode {
+  const { sections, hasAnyVolume } = groupTOC(chapters);
+  return (
+    <ul className="toc">
+      {sections.map((s, si) => (
+        <Fragment key={`sec-${si}`}>
+          {s.volume ? (
+            <li
+              className={
+                s.volume.idx === currentChapter
+                  ? 'toc__volume toc__volume--active'
+                  : 'toc__volume'
+              }
+            >
+              <button onClick={() => onJump(s.volume!.idx)}>{s.volume.title}</button>
+            </li>
+          ) : hasAnyVolume ? (
+            <li className="toc__volume toc__volume--implicit">第一卷</li>
+          ) : null}
+          {s.chapters.map((c) => (
+            <li
+              key={c.idx}
+              className={`toc__item${hasAnyVolume ? ' toc__item--nested' : ''}${
+                c.idx === currentChapter ? ' toc__item--active' : ''
+              }`}
+            >
+              <button onClick={() => onJump(c.idx)}>{c.title}</button>
+            </li>
+          ))}
+        </Fragment>
+      ))}
+    </ul>
+  );
+}
+
 function renderChapter(
   idx: number,
   text: string,
@@ -415,6 +488,28 @@ export function ReaderPage() {
     }
   }, [bookId, book, chapters, chapterText, loadedRange]);
 
+  // --- Ensure the loaded window is tall enough to scroll -------------------
+  // If the rendered content fits inside the viewport (e.g. a TOC jump
+  // landed on a 卷 header whose only content is the header line), the
+  // user has nothing to scroll, so onScroll never fires and the normal
+  // PREFETCH_TRIGGER path never kicks in — the page is stuck.
+  //
+  // After every loadedRange commit, measure scrollHeight vs clientHeight
+  // synchronously (useLayoutEffect runs between commit and paint, so the
+  // new chapter's DOM is in the tree). If we're under 1.5× viewport,
+  // kick extendDown. extendDown updates loadedRange, this effect re-fires,
+  // and the chain stops once content exceeds the threshold or EOF is
+  // reached (extendDown self-checks chapters.findIndex).
+
+  useLayoutEffect(() => {
+    if (!loadedRange) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight <= el.clientHeight * 1.5) {
+      void extendDown();
+    }
+  }, [loadedRange, extendDown]);
+
   // --- Jump to absolute char offset (TOC click, conflict resolution) ------
 
   const jumpToOffset = useCallback(
@@ -670,16 +765,11 @@ export function ReaderPage() {
                 ✕
               </button>
             </header>
-            <ul className="toc">
-              {chapters.map((c) => (
-                <li
-                  key={c.idx}
-                  className={c.idx === currentChapter ? 'toc__item toc__item--active' : 'toc__item'}
-                >
-                  <button onClick={() => onChapterClick(c.idx)}>{c.title}</button>
-                </li>
-              ))}
-            </ul>
+            <TOCList
+              chapters={chapters}
+              currentChapter={currentChapter}
+              onJump={onChapterClick}
+            />
           </aside>
         </div>
       )}

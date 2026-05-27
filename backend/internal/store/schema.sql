@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS chapters (
     book_id     INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     idx         INTEGER NOT NULL,
     title       TEXT    NOT NULL,
+    level       INTEGER NOT NULL DEFAULT 1, -- 0 = 卷 / volume, 1 = 章 / 折 / etc.
     byte_offset INTEGER NOT NULL,           -- offset in original source bytes
     char_offset INTEGER NOT NULL,           -- offset in decoded UTF-8 runes
     UNIQUE(book_id, idx)

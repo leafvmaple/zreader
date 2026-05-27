@@ -207,6 +207,7 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, path, title, a
 		storeChapters = append(storeChapters, store.Chapter{
 			Idx:        int64(c.Idx),
 			Title:      c.Title,
+			Level:      int64(c.Level),
 			ByteOffset: int64(c.ByteOffset),
 			CharOffset: int64(c.CharOffset),
 		})

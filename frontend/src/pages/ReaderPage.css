@@ -269,6 +269,37 @@
 
 .toc__item button:hover { background: var(--r-overlay); }
 .toc__item--active button { color: var(--r-accent); font-weight: 500; }
+/* Nested chapters under a 卷 header sit one indent deeper. */
+.toc__item--nested button { padding-left: 34px; }
+
+/* Volume (卷) section header. Slightly larger + heavier than chapters
+   and visually offset so the hierarchy reads at a glance. */
+.toc__volume {
+  margin-top: 4px;
+  border-top: 1px solid var(--r-divider, rgba(0, 0, 0, 0.08));
+}
+.toc__volume:first-child { border-top: 0; }
+.toc__volume button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--r-fg);
+  padding: 12px 18px 8px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toc__volume button:hover { background: var(--r-overlay); }
+.toc__volume--active button { color: var(--r-accent); }
+/* Synthetic "第一卷" for books where the author introduced volumes
+   mid-way and didn't write a marker for the opening volume — static
+   label, not clickable. */
+.toc__volume--implicit {
+  padding: 12px 18px 8px;
+  font-weight: 600;
+  color: var(--r-fg-muted);
+}
 
 /* --- Settings ------------------------------------------------------------ */
 
