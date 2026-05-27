@@ -43,7 +43,9 @@ func TestFormatText_ExtraBlanksNormalised(t *testing.T) {
 }
 
 func TestFormatText_DropsMetadataHeader(t *testing.T) {
-	const title, author = "铸蝉记", "轩辕悬"
+	// Synthetic title/author tokens — keeps the fixtures self-contained
+	// without leaking real corpus identifiers into the test corpus.
+	const title, author = "TTT", "AAA"
 	cases := []struct {
 		name string
 		in   string
@@ -51,53 +53,53 @@ func TestFormatText_DropsMetadataHeader(t *testing.T) {
 	}{
 		{
 			name: "title alone dropped",
-			in:   "　　铸蝉记\n\n　　楔子\n\n　　正文第一段。\n",
+			in:   "　　TTT\n\n　　楔子\n\n　　正文第一段。\n",
 			want: "楔子\n\n正文第一段。\n",
 		},
 		{
 			name: "author alone dropped",
-			in:   "　　轩辕悬\n\n　　楔子\n",
+			in:   "　　AAA\n\n　　楔子\n",
 			want: "楔子\n",
 		},
 		{
 			name: "title + space + author dropped",
-			in:   "　　铸蝉记 轩辕悬\n\n　　楔子\n",
+			in:   "　　TTT AAA\n\n　　楔子\n",
 			want: "楔子\n",
 		},
 		{
 			name: "title + by:author dropped",
-			in:   "　　铸蝉记 by:轩辕悬\n\n　　楔子\n",
+			in:   "　　TTT by:AAA\n\n　　楔子\n",
 			want: "楔子\n",
 		},
 		{
 			name: "bare by:author dropped",
-			in:   "　　by:轩辕悬\n\n　　第一章\n",
+			in:   "　　by:AAA\n\n　　第一章\n",
 			want: "第一章\n",
 		},
 		{
 			name: "full-width colon variant dropped",
-			in:   "　　铸蝉记 by：轩辕悬\n\n　　楔子\n",
+			in:   "　　TTT by：AAA\n\n　　楔子\n",
 			want: "楔子\n",
 		},
 		{
 			name: "title bare-colon author dropped",
-			in:   "　　铸蝉记：轩辕悬\n\n　　楔子\n",
+			in:   "　　TTT：AAA\n\n　　楔子\n",
 			want: "楔子\n",
 		},
 		{
 			name: "title 作者：author dropped",
-			in:   "　　铸蝉记 作者：轩辕悬\n\n　　楔子\n",
+			in:   "　　TTT 作者：AAA\n\n　　楔子\n",
 			want: "楔子\n",
 		},
 		{
 			name: "Author: english label dropped",
-			in:   "　　铸蝉记 Author:轩辕悬\n\n　　楔子\n",
+			in:   "　　TTT Author:AAA\n\n　　楔子\n",
 			want: "楔子\n",
 		},
 		{
 			name: "title prefix with extra body preserved",
-			in:   "　　铸蝉记这是一段正文。\n",
-			want: "铸蝉记这是一段正文。\n",
+			in:   "　　TTT这是一段正文。\n",
+			want: "TTT这是一段正文。\n",
 		},
 		{
 			name: "wrong author after by: marker preserved",

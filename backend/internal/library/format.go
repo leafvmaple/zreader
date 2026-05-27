@@ -296,28 +296,28 @@ var metadataAuthorMarker = regexp.MustCompile(`^(?i)(by\s*[:：]|author\s*[:：]
 // them), separated by whitespace. The paragraph must be consumed in
 // full; any leftover content disqualifies it.
 //
-// The rule is: this paragraph carries no body meaning, so the reader
+// The rule: this paragraph carries no body meaning, so the reader
 // shouldn't see it. A line that contains only the title, only the
 // author, both, or either preceded by an author marker (`by:`,
 // `作者：`, bare `：`, …) is dropped.
 //
-// Matches (title="铸蝉记", author="轩辕悬"):
+// Matches (with title="<T>", author="<A>"):
 //
-//	铸蝉记                  → title alone
-//	轩辕悬                  → author alone
-//	铸蝉记 轩辕悬           → title + author (no marker)
-//	铸蝉记 by:轩辕悬        → title + by:author
-//	铸蝉记：轩辕悬          → title:author (bare colon)
-//	铸蝉记 作者：轩辕悬     → title + 作者:author
-//	by:轩辕悬               → author marker + author
-//	作者：轩辕悬            → 作者:author
+//	<T>                  → title alone
+//	<A>                  → author alone
+//	<T> <A>              → title + author (no marker)
+//	<T> by:<A>           → title + by:author
+//	<T>：<A>             → title:author (bare colon)
+//	<T> 作者：<A>        → title + 作者:author
+//	by:<A>               → author marker + author
+//	作者：<A>            → 作者:author
 //
 // Doesn't match (preserved as body):
 //
-//	铸蝉记这是正文           → title prefix but extra body
-//	by:别人                  → wrong author after marker
-//	她说 by:领导的命令       → author marker mid-sentence, no anchor
-//	某天                     → unrelated body line
+//	<T><extra body>      → title prefix but extra trailing content
+//	by:<wrong>           → wrong author after marker
+//	... by:...           → author marker mid-sentence, no anchor
+//	<unrelated line>     → unrelated body line
 //
 // Pass empty title/author to disable the corresponding token — used
 // by tests that don't go through ResolveMetadata.
