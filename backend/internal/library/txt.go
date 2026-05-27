@@ -66,8 +66,14 @@ import (
 //
 // Group 1 captures the chapter title: marker + a short subtitle. The
 // subtitle arm tries `[…]{0,11}（X）` first (clean part-marker form like
-// `（上）/（下）/（补）/（外传）`), otherwise caps at 10 chars (bound for
-// chapter titles glued to the first body paragraph).
+// `（上）/（下）/（补）/（外传）`), otherwise caps at 10 chars.
+//
+// Whole-line anchored at the end (`[\s\p{Zs}]*$`): a real chapter
+// title fills its own line, so any text trailing past the 10-char
+// subtitle bound means we're looking at a body paragraph that
+// happens to start with `第X章/节/…`. Anchoring rejects those (real
+// glued-to-body cases are peeled by FormatText's titleBodySplitPattern
+// before parsing).
 var ChapterPattern = regexp.MustCompile(
 	`^[\s\p{Zs}]*` +
 		`(` +
@@ -75,7 +81,8 @@ var ChapterPattern = regexp.MustCompile(
 		`(?:[^\r\n。「」]{0,11}（[^）\r\n]{1,6}）|[^\r\n。「」]{0,10})` +
 		`|Chapter\s+\d+[^\r\n]{0,30}` +
 		`|CHAPTER\s+\d+[^\r\n]{0,30}` +
-		`)`,
+		`)` +
+		`[\s\p{Zs}]*$`,
 )
 
 // VolumePattern matches a 卷 header that occupies its own (formatted)
@@ -177,16 +184,18 @@ var AuthorByPattern = regexp.MustCompile(`(?i)^(.*?)\bby\s*[:：]\s*([^\r\n]+?)\
 // Defensive bounds:
 //   - Title prefix capped at 30 chars so a long body sentence ending
 //     with `…作者：…` can't false-positive as a title.
-//   - Author capped at 6 chars (real Chinese pen names are 2-5,
-//     occasionally 6) and forbids punctuation / whitespace. Combined
-//     with the `\s*$` end-anchor this rejects body lines like
-//     `作者：AAA加上更多文字` — greedy capture exceeds 6 chars and
-//     the remaining tail can't satisfy `\s*$`.
+//   - Author capped at 16 chars to accommodate ASCII pen names
+//     (real-world net-novel handles run up to ~15 chars with
+//     underscores and digits) while still imposing a bound that
+//     rejects clear body-prose runs. Whitespace and Chinese / ASCII
+//     punctuation are forbidden, so an author capture stops at the
+//     first comma / full stop / quote boundary even if the line
+//     contains more text after.
 //
 // Anchored at line start + end. ASCII and full-width colon both
 // accepted.
 var AuthorLabelPattern = regexp.MustCompile(
-	`^([^\r\n]{0,30}?)作者\s*[:：]\s*([^\r\n，。！？,.!?\s]{1,6})\s*$`,
+	`^([^\r\n]{0,30}?)作者\s*[:：]\s*([^\r\n，。！？,.!?\s]{1,16})\s*$`,
 )
 
 const authorScanLines = 30

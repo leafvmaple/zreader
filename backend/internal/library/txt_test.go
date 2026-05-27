@@ -53,6 +53,40 @@ func TestParseChapters_BracketedNumerals(t *testing.T) {
 	}
 }
 
+func TestParseChapters_ParenthesisedNumeral(t *testing.T) {
+	// Personal-essay TXTs use `（X）` standalone as a chapter divider.
+	// Whole-line anchored so inline `（一）` in body prose doesn't match.
+	text := "（零）\n正文。\n\n（一）\n更多正文。\n\n他翻到了（二）页查看。\n\n（二）\n再来正文。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 3 {
+		t.Fatalf("want 3 (zero/one/two), got %d: %+v", len(out), out)
+	}
+	want := []string{"（零）", "（一）", "（二）"}
+	for i, c := range out {
+		if c.Title != want[i] {
+			t.Errorf("idx %d: title=%q, want %q", i, c.Title, want[i])
+		}
+	}
+}
+
+func TestParseChapters_StructuredRejectsBodyTrail(t *testing.T) {
+	// `第X章/节/…` whole-line anchored: a body paragraph that happens
+	// to start with `第X节` and continues into prose must NOT match
+	// (the marker isn't followed by a clean chapter-title-shaped tail).
+	text := "第一章　起源\n" +
+		"内容内容。\n\n" +
+		"　　第一节甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉。\n\n" +
+		"第二章　承接\n" +
+		"更多内容。\n"
+	out := ParseChapters(text, nil)
+	if len(out) != 2 {
+		t.Fatalf("want 2 (only real chapters), got %d: %+v", len(out), out)
+	}
+	if out[0].Title != "第一章　起源" || out[1].Title != "第二章　承接" {
+		t.Errorf("wrong titles: %+v", out)
+	}
+}
+
 func TestParseChapters_BracketedVariants(t *testing.T) {
 	// Mix of bracket styles + Arabic + multi-digit numerals.
 	text := "【一】\nA\n〈二〉\nB\n『3』\nC\n[二十]\nD\n"
@@ -260,7 +294,9 @@ func TestDetectMetadata(t *testing.T) {
 		{"Chinese 作者 inline + leading centring whitespace",
 			"　　　　　　书名丙作者：作者丁\n", "书名丙", "作者丁"},
 		{"作者 with trailing prose — author capture rejected by length cap",
-			"作者：AAA加上更多文字补足长度\n", "", ""},
+			"作者：AAA加上更多文字补足长度甲乙丙丁戊己庚辛\n", "", ""},
+		{"作者 with ASCII handle including underscore + digits",
+			"作者：abc_xyz123\n", "", "abc_xyz123"},
 		{"by: takes precedence over 作者 (same scan)",
 			"标题甲 by:作者甲\n\n作者：另一人\n", "标题甲", "作者甲"},
 	}

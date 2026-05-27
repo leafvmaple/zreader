@@ -51,15 +51,19 @@ const (
 	anyStructuredUnit = `[章节回卷篇集部折]`
 
 	// bracketedNumeralBody is the standalone `「N」` / `【N】` /
-	// `〈N〉` / `[N]` shape — a CJK or Arabic numeral wrapped in
-	// one of the recognised bracket pairs (`《》` excluded because
-	// it's used for book titles; `（）` / `()` excluded because
-	// they're far too common inline).
+	// `〈N〉` / `[N]` / `（N）` / `(N)` shape — a CJK or Arabic
+	// numeral wrapped in one of the recognised bracket pairs.
+	// `《》` is excluded (used for book titles). The Chinese and
+	// ASCII parens used to be excluded too because they're common
+	// inline, but the whole-line anchor in BracketedNumeralPattern
+	// (and the structural mid-line context in chapterSplitPattern)
+	// gates them safely; whole-line `（一）` is a strong chapter-
+	// divider signal in personal-essay / short-story TXTs.
 	//
 	// Reused both as a whole-line chapter marker (txt.go's
 	// BracketedNumeralPattern) and as a mid-paragraph split point
 	// (format.go's chapterSplitPattern / titleBodySplitPattern).
-	bracketedNumeralBody = `[「『【〈\[]\s*` + chapterNumeral + `+\s*[」』】〉\]]`
+	bracketedNumeralBody = `[「『【〈\[（(]\s*` + chapterNumeral + `+\s*[」』】〉\]）)]`
 
 	// symmetricHanSubtitle matches the strict N+N comma-separated
 	// Han subtitle shape (`XXXX，XXXX` etc.) we use as a title-end
