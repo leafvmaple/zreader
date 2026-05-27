@@ -304,7 +304,19 @@ export function ReaderPage() {
           ? Math.max(0, Math.min(1, (charOffset - ch.char_offset) / range.len))
           : 0;
 
-      el.scrollTop = chapterTop + within * chapterHeight;
+      // Back off by the container's top padding (which exists to clear
+      // the absolute-positioned chrome bar). Without this the anchor
+      // lands at viewport y=0, behind the chrome — the symptom the user
+      // sees as "TOC jumps to the wrong place" (title hidden, body
+      // appears to start mid-chapter).
+      const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
+      const target = Math.max(0, chapterTop + within * chapterHeight - padTop);
+      // behavior: 'instant' bypasses the container's CSS scroll-behavior:
+      // smooth. A bare `scrollTop = X` starts a smooth animation that
+      // overlaps the subsequent onScroll → extendUp → compensate chain;
+      // the animation then wins and compensate is lost, leaving the
+      // reader rendered one chapter short of the saved offset.
+      el.scrollTo({ top: target, behavior: 'instant' });
       return true;
     },
     [book, chapters, loadedRange],
@@ -369,11 +381,20 @@ export function ReaderPage() {
     // useLayoutEffect would be tighter, but only fires after the next
     // dep change, which is exactly the loadedRange transition we
     // trigger here — too brittle, easier to stick with rAF.
+    //
+    // `behavior: 'instant'` is critical — without it the container's
+    // CSS `scroll-behavior: smooth` overlaps any concurrent programmatic
+    // scroll (e.g. cold-start applyScroll → triggers onScroll →
+    // triggers extendUp), and the in-flight animation overwrites this
+    // compensation — leaving the reader rendered one chapter above its
+    // intended position.
     const compensate = () => {
       const after = scrollRef.current;
       if (!after) return;
       const delta = after.scrollHeight - prevScrollHeight;
-      if (delta > 0) after.scrollTop = prevScrollTop + delta;
+      if (delta > 0) {
+        after.scrollTo({ top: prevScrollTop + delta, behavior: 'instant' });
+      }
     };
 
     // Cache hit — no network round trip, just unhide the chapter.
@@ -432,9 +453,15 @@ export function ReaderPage() {
     const el = scrollRef.current;
     if (!el) return;
 
-    // Find which loaded chapter contains the viewport-top anchor.
+    // The "reading position" is the scroll-content row that sits just
+    // below the chrome bar — i.e. scrollTop + paddingTop. Using bare
+    // scrollTop here would report progress for a row that's behind the
+    // chrome, and pair with applyScrollFromOffset's padTop offset to
+    // misclassify the active chapter right after a TOC jump.
     const viewport = el.clientHeight;
     const scrollTop = el.scrollTop;
+    const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const readingPos = scrollTop + padTop;
     const total = book.char_count ?? 0;
 
     let activeIdx = loadedRange.lo;
@@ -446,7 +473,7 @@ export function ReaderPage() {
       const next = document.getElementById(`chap-${idx + 1}`);
       const top = anchor.offsetTop;
       const bottom = next ? next.offsetTop : el.scrollHeight;
-      if (scrollTop + 1 < bottom) {
+      if (readingPos + 1 < bottom) {
         activeIdx = idx;
         activeTop = top;
         activeHeight = Math.max(1, bottom - top);
@@ -458,7 +485,7 @@ export function ReaderPage() {
     if (total > 0) {
       const ch = chapters.find((c) => c.idx === activeIdx);
       if (ch) {
-        const within = Math.max(0, Math.min(1, (scrollTop - activeTop) / activeHeight));
+        const within = Math.max(0, Math.min(1, (readingPos - activeTop) / activeHeight));
         const range = chapterCharRange(activeIdx, chapters, total);
         const len = range?.len ?? 0;
         const absOffset = Math.min(total, ch.char_offset + Math.floor(within * len));
