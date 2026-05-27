@@ -193,6 +193,91 @@ cd backend && go run ./cmd/zreader
 docker compose up -d --build
 ```
 
+## Workflow — you own the regression check
+
+The user grades on the final result, not intermediate logic. **Whatever
+you change (bugfix, refactor, new feature) you exercise end-to-end
+yourself before declaring done.** A plausible-looking diff is not a
+fix; "I think this works" failed before and will fail again.
+
+### The loop
+
+1. **Reproduce** the bug / drive the feature yourself first. Capture
+   the exact observable that's wrong (scrollTop value, parsed chapter
+   count, API response shape) — that's your acceptance criterion.
+2. **Change** the code.
+3. **Re-run the same reproduction.** If the observable still mismatches,
+   the fix is wrong — go back to step 2. Don't stop at the first
+   plausible diff. The TOC-jump bug was a three-step race
+   (`scroll-behavior: smooth` × `onScroll` × `extendUp/compensate`)
+   hiding behind a one-step symptom; the first fix was correct but
+   incomplete.
+4. **Lock it in** as a test when cheap: Go unit test against the
+   `books/` corpus for parser / formatter bugs; a one-off Playwright
+   probe is fine to delete after verifying — only keep it if the
+   regression is likely to recur and the probe is short.
+
+This applies to new features too — building the feature without
+driving the real flow that uses it counts as half done.
+
+### Tool chain (Windows host)
+
+- **pnpm** is not on PATH by default. Bring it up via corepack —
+  `corepack enable && corepack prepare pnpm@latest --activate`, then
+  `cd frontend && pnpm install`.
+- **node / npx** live at `C:\Program Files\nodejs\` and are already on
+  PATH.
+- **Dev backend port conflict**: `:8080` is usually held by
+  `docker compose` running the production image. Either `docker
+  compose down` first, or run the dev backend on a free port
+  (`ZREADER_PORT=18080 go run ./cmd/zreader`) and proxy vite to it.
+- **Background processes**: launch dev servers with the Bash tool's
+  `run_in_background` and tear them down before finishing.
+
+### Driving the SPA — Playwright probe pattern
+
+Reader bugs (chapter jumps, scroll restore, progress reporting) are
+not provable from reading TS source. CSS effects (`scroll-behavior`,
+`overflow-anchor`, `offsetParent`, `padding`) interact with React
+state batches and async fetches in ways static analysis won't surface.
+Drive the real browser:
+
+```bash
+# One-time install per agent session that needs it
+cd frontend && pnpm add -D playwright
+pnpm exec playwright install chromium
+
+# probe.mjs — minimal pattern:
+#   - chromium.launch({ headless: true })
+#   - page.on('console', ...) to capture any [zreader] logs you added
+#   - page.goto('http://localhost:5173/') and click through the flow
+#   - page.evaluate(() => ({ scrollTop, anchorOffsetTop, anchorRectTop,
+#       computed paddingTop, chromeHeight, ... }))
+#   - assert expected vs observed, exit non-zero on mismatch
+
+node probe.mjs
+
+# Remove playwright + probe.mjs before commit unless the probe
+# becomes a durable, fast regression test.
+```
+
+Add `console.log('[zreader] ...', { ... })` temporarily in the suspect
+path while iterating; remove before shipping. Logs alone aren't
+enough — without driving the browser you won't see the real timing of
+`scroll-behavior: smooth` and async extension.
+
+### Where the proxy points
+
+`vite.config.ts` proxies `/api` to `127.0.0.1:8080`. So vite dev at
+`http://localhost:5173` talks to **whatever is on :8080** — usually the
+docker container. If you're testing a backend change too, either stop
+docker and run `go run ./cmd/zreader` on :8080, or rebuild the docker
+image (`docker compose up -d --build`) so the embedded SPA also picks
+up your frontend change. Hitting `http://localhost:8080` directly
+shows the docker-embedded SPA bundle, **not** vite's live code — this
+has bitten the user once already ("还是不对" while testing the wrong
+URL).
+
 ## Things easy to get wrong
 
 - **Scanner re-runs the full format → ingest pipeline unconditionally**
