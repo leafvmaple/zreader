@@ -46,42 +46,54 @@ package library
 import (
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
-// ChapterPattern matches a structured chapter header at the start of a
-// (formatted) line. ParseChapters assumes the input has been normalised
-// by the format step (library.FormatToCache during scan) first — every
-// chapter marker stands at the beginning of its own paragraph — so
-// there's no sub-line / preceding-punctuation gate here. If a real-
-// world TXT defeats detection, fix it in FormatText so the parser
-// keeps seeing canonical input; don't grow this pattern with format-
-// specific fallbacks.
+// chapterPatternFor builds a regex matching `第X<unit>[subtitle]` on
+// its own (formatted) line, for a specific unit character. We have one
+// rule per unit (章/节/回/折/篇/集) instead of one combined rule so the
+// survey-and-select pass in ParseChapters can pick the unit a given
+// book actually uses — a book using `第X回` doesn't want stray
+// `第二节晚自习` body matches polluting its TOC.
 //
-// The `卷` unit is intentionally NOT in the structured arm — volume
-// headers are matched by VolumePattern (level=0) so the frontend can
-// nest chapters underneath. Books that mix `第X卷` and `第Y章` would
-// otherwise have both end up flat at the same level.
-//
-// Group 1 captures the chapter title: marker + a short subtitle. The
-// subtitle arm tries `[…]{0,11}（X）` first (clean part-marker form like
+// Group 1 captures the title (marker + subtitle). The subtitle arm
+// tries `[…]{0,11}（X）` first (clean part-marker form like
 // `（上）/（下）/（补）/（外传）`), otherwise caps at 10 chars.
 //
-// Whole-line anchored at the end (`[\s\p{Zs}]*$`): a real chapter
-// title fills its own line, so any text trailing past the 10-char
-// subtitle bound means we're looking at a body paragraph that
-// happens to start with `第X章/节/…`. Anchoring rejects those (real
-// glued-to-body cases are peeled by FormatText's titleBodySplitPattern
-// before parsing).
-var ChapterPattern = regexp.MustCompile(
+// Whole-line anchored at the end — a real chapter title fills its
+// own line; text trailing past the 10-char subtitle bound means the
+// line is body that happens to start with `第X<unit>`. Glued-to-body
+// cases are peeled out earlier by FormatText's titleBodySplitPattern.
+func chapterPatternFor(unit string) *regexp.Regexp {
+	return regexp.MustCompile(
+		`^[\s\p{Zs}]*` +
+			`(第\s*` + chapterNumeral + `+\s*` + unit +
+			`(?:[^\r\n。「」]{0,11}（[^）\r\n]{1,6}）|[^\r\n。「」]{0,10})` +
+			`)` +
+			`[\s\p{Zs}]*$`,
+	)
+}
+
+// Per-unit chapter patterns. Each is scored independently in the
+// fit-assessment pass so spurious unit chars from body text get
+// filtered out by the dominant unit's score.
+var (
+	chapterByZhangPattern = chapterPatternFor("章")
+	chapterByJiePattern   = chapterPatternFor("节")
+	chapterByHuiPattern   = chapterPatternFor("回")
+	chapterByZhePattern   = chapterPatternFor("折")
+	chapterByPianPattern  = chapterPatternFor("篇")
+	chapterByJiPattern    = chapterPatternFor("集")
+)
+
+// ChapterEnglishPattern matches `Chapter N` / `CHAPTER N` style
+// headers (English-language e-novels in our corpus occasionally use
+// these). Capture group 1 = title.
+var ChapterEnglishPattern = regexp.MustCompile(
 	`^[\s\p{Zs}]*` +
-		`(` +
-		`第\s*` + chapterNumeral + `+\s*` + structuredUnit +
-		`(?:[^\r\n。「」]{0,11}（[^）\r\n]{1,6}）|[^\r\n。「」]{0,10})` +
-		`|Chapter\s+\d+[^\r\n]{0,30}` +
-		`|CHAPTER\s+\d+[^\r\n]{0,30}` +
-		`)` +
+		`(Chapter\s+\d+[^\r\n]{0,30}|CHAPTER\s+\d+[^\r\n]{0,30})` +
 		`[\s\p{Zs}]*$`,
 )
 
@@ -247,50 +259,77 @@ type Chapter struct {
 	ByteOffset int
 }
 
+// ruleMode picks the selection strategy for a chapter rule's matches.
+type ruleMode int
+
+const (
+	// modeTrust: the pattern's word-shape is distinctive enough that
+	// any match is taken at face value. Used for low-cardinality fixed
+	// vocabularies (楔子/序章/…) and unambiguous bracketed numerals.
+	modeTrust ruleMode = iota
+	// modeCompete: the pattern can also fire on body prose (every
+	// `第X<unit>` shape, enumerated `一、…`). Kept only when its
+	// confidence score clears the dominance threshold at its rank.
+	modeCompete
+)
+
 // chapterRule is one row in the marker-hierarchy registry. Rank fixes
 // the rule's place in the hierarchy — smaller = outer, larger =
-// leaf-ward. The pattern's first capture group is the chapter title.
+// leaf-ward. Mode controls how the rule's matches are validated.
+// MinCount sets an absolute floor on match count for compete-mode
+// rules (default 1 if zero): patterns whose noise floor warrants
+// extra evidence (enumerated, loose-digit) can require more.
 //
-// Strict marks rules whose word-shape is distinctive enough to trust
-// every match (部 / 卷 / 第X章 / 楔子 / bracketed numerals — all hard
-// to confuse with body content). Non-strict rules use shapes that
-// occur incidentally in prose ("六、" appears in inline enumeration,
-// bare digits show up in dates / page numbers) — they're only kept
-// when their count actually outnumbers the strict matches at the
-// same rank, otherwise they're treated as noise.
-//
-// Several rules can share a rank when the same tier admits multiple
-// shapes (the chapter tier covers `第X章`, `楔子`, bracketed numerals,
-// enumerated, …).
+// Several rules can share a rank (chapter tier has `第X章`, `第X节`,
+// `第X回`, etc., plus the named/bracketed/enumerated shapes).
 type chapterRule struct {
-	name    string
-	rank    int
-	pattern *regexp.Regexp
-	strict  bool
+	name     string
+	rank     int
+	pattern  *regexp.Regexp
+	mode     ruleMode
+	minCount int
 }
 
 // chapterRules is the registry of marker tiers in rank order. Adding
 // a new tier — say `第X篇` between 卷 and 章 — is a one-line insert
-// here plus bumping the deeper rules' ranks. The parsing, merging,
-// depth computation, tree building and EPUB serialisation downstream
-// all derive their behaviour from this table — no constant lookups,
-// no per-tier branching elsewhere in the codebase.
+// here plus bumping the deeper rules' ranks. The parsing, scoring,
+// merging, depth computation, tree building and EPUB serialisation
+// downstream all derive their behaviour from this table — no constant
+// lookups, no per-tier branching elsewhere in the codebase.
 //
-// To support, e.g., 5-level books with `部 / 篇 / 卷 / 章 / 节`:
-// declare each marker's regex, insert into this slice at the right
-// rank, set strict as appropriate, and you're done.
+// Chapter-tier `第X<unit>` is split per unit char so a `第X回` book
+// can score `第X节` body lines down to zero; otherwise the union arm
+// would lump them together and one stray `第二节晚自习` would smuggle
+// itself into the TOC.
 var chapterRules = []chapterRule{
-	{name: "part", rank: 0, pattern: PartPattern, strict: true},
-	{name: "volume", rank: 1, pattern: VolumePattern, strict: true},
-	{name: "chapter", rank: 2, pattern: ChapterPattern, strict: true},
-	{name: "named", rank: 2, pattern: NamedChapterPattern, strict: true},
-	{name: "bracketed", rank: 2, pattern: BracketedNumeralPattern, strict: true},
-	{name: "enumerated", rank: 2, pattern: EnumeratedNumeralPattern, strict: false},
+	{name: "part", rank: 0, pattern: PartPattern, mode: modeCompete},
+	{name: "volume", rank: 1, pattern: VolumePattern, mode: modeCompete},
+	{name: "ch-zhang", rank: 2, pattern: chapterByZhangPattern, mode: modeCompete},
+	{name: "ch-jie", rank: 2, pattern: chapterByJiePattern, mode: modeCompete},
+	{name: "ch-hui", rank: 2, pattern: chapterByHuiPattern, mode: modeCompete},
+	{name: "ch-zhe", rank: 2, pattern: chapterByZhePattern, mode: modeCompete},
+	{name: "ch-pian", rank: 2, pattern: chapterByPianPattern, mode: modeCompete},
+	{name: "ch-ji", rank: 2, pattern: chapterByJiPattern, mode: modeCompete},
+	{name: "ch-en", rank: 2, pattern: ChapterEnglishPattern, mode: modeCompete},
+	{name: "named", rank: 2, pattern: NamedChapterPattern, mode: modeTrust},
+	{name: "bracket", rank: 2, pattern: BracketedNumeralPattern, mode: modeTrust},
+	{name: "enum", rank: 2, pattern: EnumeratedNumeralPattern, mode: modeCompete, minCount: 2},
 }
+
+// rankMinKept caps single-match false positives at container tiers.
+// Parts/volumes that come in groups (real ones) clear this; an
+// isolated body line like `第一部经书` won't. The chapter tier accepts
+// singletons because a one-chapter book is plausible.
+var rankMinKept = map[int]int{0: 2, 1: 2, 2: 1}
+
+// dominanceRatio is the fraction of the rank's strongest signal a
+// compete-mode rule must reach to be kept. 0.5 means "at least half
+// as much evidence as the dominant rule at this rank".
+const dominanceRatio = 0.5
 
 // chapterLeafRank is the rank of the deepest tier in chapterRules.
 // The loose-digit fallback uses this rank, and the "is the chapter
-// tier dense enough?" gate counts entries at this rank.
+// tier dense enough?" gate counts kept entries at this rank.
 var chapterLeafRank = func() int {
 	r := 0
 	for _, rule := range chapterRules {
@@ -310,21 +349,23 @@ var chapterLeafRank = func() int {
 //
 // When `re` is nil the matcher runs in two phases:
 //
-//	Phase 1 — Survey: scan every rule, collect matches and per-rank
-//	          strict-match counts. We don't yet know what the book's
-//	          chapter convention is.
+//	Phase 1 — Survey: scan every rule, collect matches per rule.
+//	          Nothing is decided yet.
 //
-//	Phase 2 — Select & merge: keep every strict rule's matches; keep a
-//	          non-strict rule only if it outnumbers the strict matches
-//	          at its rank (otherwise it's pattern noise leaking from
-//	          body prose). Merge the kept lists by offset, rewrite
-//	          Level to tree-position depth via assignDepth.
+//	Phase 2 — Score & select: each compete-mode rule gets a confidence
+//	          score = count × (0.3 + 0.7 × consecutiveRatio), trust-
+//	          mode rules use raw count. At each rank we keep:
+//	          (a) every trust rule with at least one match;
+//	          (b) every compete rule whose score is >= max(max_compete
+//	              _score × dominanceRatio, trust_count × 1.0) AND
+//	              count >= rule.minCount;
+//	          (c) the rank itself only if the total kept-count meets
+//	              rankMinKept[rank] (singleton parts/volumes drop).
 //
-// If the chapter tier still ends up sparse, the loose-digit fallback
-// fills in; if nothing matched at all, a synthetic "正文" stands
-// alone. Downstream (BuildEpub, frontend TOC) treats Level as
-// 0-indexed nesting depth without needing to know which markers
-// produced it.
+// Surviving matches merge by offset; assignDepth rewrites Level to
+// tree-position depth. If the chapter tier still ends up sparse, the
+// loose-digit fallback fills in; if nothing matched at all, a
+// synthetic "正文" stands alone.
 func ParseChapters(text string, re *regexp.Regexp) []Chapter {
 	if re != nil {
 		out := scanLineAnchored(text, re, 0)
@@ -334,34 +375,19 @@ func ParseChapters(text string, re *regexp.Regexp) []Chapter {
 		return out
 	}
 
-	// Phase 1: scan every rule, count strict matches per rank.
 	matches := make([][]Chapter, len(chapterRules))
-	strictAtRank := map[int]int{}
 	for i, r := range chapterRules {
 		matches[i] = scanLineAnchored(text, r.pattern, r.rank)
-		if r.strict {
-			strictAtRank[r.rank] += len(matches[i])
-		}
 	}
 
-	// Phase 2: select rules whose matches we trust, then merge.
-	lists := make([][]Chapter, 0, len(chapterRules))
+	primary := selectChapters(matches)
+
 	leafCount := 0
-	for i, r := range chapterRules {
-		list := matches[i]
-		if !r.strict && len(list) <= strictAtRank[r.rank] {
-			// Non-strict rule didn't outnumber strict matches at its
-			// rank — treat as noise (e.g. `六、` enumeration inside a
-			// book that uses `第X章` as its real divider).
-			continue
-		}
-		lists = append(lists, list)
-		if r.rank == chapterLeafRank {
-			leafCount += len(list)
+	for _, c := range primary {
+		if c.Level == chapterLeafRank {
+			leafCount++
 		}
 	}
-	primary := mergeChapters(lists...)
-
 	if leafCount >= minPrimaryForNoFallback {
 		return assignDepth(primary)
 	}
@@ -373,6 +399,125 @@ func ParseChapters(text string, re *regexp.Regexp) []Chapter {
 		return assignDepth(primary)
 	}
 	return syntheticChapter()
+}
+
+// selectChapters runs the score-and-keep policy over the per-rule
+// match lists. Returns the merged kept matches; the merge order
+// keeps offset ordering stable.
+func selectChapters(matches [][]Chapter) []Chapter {
+	// Per-rank statistics from Phase 1 results.
+	maxCompeteScore := map[int]float64{}
+	trustCount := map[int]int{}
+	for i, r := range chapterRules {
+		if len(matches[i]) == 0 {
+			continue
+		}
+		switch r.mode {
+		case modeTrust:
+			trustCount[r.rank] += len(matches[i])
+		case modeCompete:
+			s := scoreRule(matches[i])
+			if s > maxCompeteScore[r.rank] {
+				maxCompeteScore[r.rank] = s
+			}
+		}
+	}
+
+	// Decide which rules' matches to keep.
+	keep := make([]bool, len(chapterRules))
+	keptCount := map[int]int{}
+	for i, r := range chapterRules {
+		if len(matches[i]) == 0 {
+			continue
+		}
+		if r.mode == modeTrust {
+			keep[i] = true
+			keptCount[r.rank] += len(matches[i])
+			continue
+		}
+		// Compete: must clear absolute floor + dominance threshold.
+		minC := r.minCount
+		if minC < 1 {
+			minC = 1
+		}
+		if len(matches[i]) < minC {
+			continue
+		}
+		s := scoreRule(matches[i])
+		threshold := maxCompeteScore[r.rank] * dominanceRatio
+		if t := float64(trustCount[r.rank]); t > threshold {
+			threshold = t
+		}
+		if s < threshold {
+			continue
+		}
+		keep[i] = true
+		keptCount[r.rank] += len(matches[i])
+	}
+
+	// Drop ranks whose total kept count doesn't meet the minimum —
+	// catches isolated body false-positives at container tiers (a
+	// lone `第一部经书` standalone paragraph in a chapter-only book).
+	for rank, total := range keptCount {
+		min := rankMinKept[rank]
+		if min == 0 {
+			min = 1
+		}
+		if total < min {
+			for i, r := range chapterRules {
+				if r.rank == rank {
+					keep[i] = false
+				}
+			}
+		}
+	}
+
+	// Collect kept lists; mergeChapters dedups + sorts by offset.
+	lists := make([][]Chapter, 0, len(chapterRules))
+	for i := range chapterRules {
+		if keep[i] {
+			lists = append(lists, matches[i])
+		}
+	}
+	return mergeChapters(lists...)
+}
+
+// scoreRule computes a confidence score for a rule's match list.
+// score = count × (0.3 + 0.7 × consecutiveRatio). Higher count and
+// higher consecutiveness both raise the score; the 0.3 floor keeps
+// a single-match rule from scoring zero just because there's no
+// pair to be consecutive with.
+func scoreRule(matches []Chapter) float64 {
+	if len(matches) == 0 {
+		return 0
+	}
+	return float64(len(matches)) * (0.3 + 0.7*consecutiveRatio(matches))
+}
+
+// consecutiveRatio is the fraction of adjacent match pairs whose
+// parsed chapter numbers are exactly +1 apart. A book where the
+// chapter index resets per volume (1..10, 1..10, …) still scores
+// high — only the inter-volume reset pairs miss, the rest are
+// consecutive. A noise pattern with random body numbers scores low.
+// Returns 1.0 for <2 parseable numbers (vacuous — no pairs to
+// compare).
+func consecutiveRatio(matches []Chapter) float64 {
+	nums := make([]int, 0, len(matches))
+	for _, c := range matches {
+		if n, ok := parseChapterNumber(c.Title); ok {
+			nums = append(nums, n)
+		}
+	}
+	if len(nums) < 2 {
+		return 1.0
+	}
+	consec := 0
+	for i := 1; i < len(nums); i++ {
+		if nums[i] == nums[i-1]+1 {
+			consec++
+		}
+	}
+	return float64(consec) / float64(len(nums)-1)
 }
 
 // assignDepth walks an offset-sorted chapter list (whose Level field
@@ -491,6 +636,131 @@ func mergeChapters(lists ...[]Chapter) []Chapter {
 
 func syntheticChapter() []Chapter {
 	return []Chapter{{Idx: 1, Title: "正文", Level: 0, CharOffset: 0, ByteOffset: 0}}
+}
+
+// parseChapterNumber extracts the integer index from a chapter title.
+// Handles both ASCII digits ("第12章…", "Chapter 7") and CJK numerals
+// up to four-digit values ("第一章", "第二十", "第一百零一"). The
+// numeral run is located by skipping any leading `第` and consuming
+// the first contiguous digit-or-cjk-numeral run; everything after
+// that run is the unit + subtitle and is ignored.
+//
+// Returns (0, false) when no numeral run is parseable — used by
+// consecutiveRatio to skip titles whose index can't be compared
+// (named chapters like 楔子, or English `Chapter N` where N parses
+// fine via the ASCII fast path).
+func parseChapterNumber(title string) (int, bool) {
+	rest := strings.TrimSpace(title)
+	if rest == "" {
+		return 0, false
+	}
+	// English `Chapter N` / `CHAPTER N`: skip word + whitespace.
+	if low := strings.ToLower(rest); strings.HasPrefix(low, "chapter") {
+		rest = strings.TrimLeft(rest[len("chapter"):], " \t")
+	} else {
+		// Skip a leading `第` (with optional whitespace after).
+		rest = strings.TrimPrefix(rest, "第")
+		rest = strings.TrimLeft(rest, " \t　")
+		// Skip a leading bracket (for "「一」", "（三）" etc.).
+		for _, b := range "「『【〈[（(" {
+			rest = strings.TrimPrefix(rest, string(b))
+		}
+	}
+	run := extractNumeralRun(rest)
+	if run == "" {
+		return 0, false
+	}
+	return parseNumeralRun(run)
+}
+
+// extractNumeralRun returns the longest leading run of ASCII digit /
+// CJK numeral characters from s, stopping at the first non-numeral
+// rune (typically a unit char like 章/卷/部 or punctuation).
+func extractNumeralRun(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= '0' && r <= '9') || isCJKNumeral(r) {
+			b.WriteRune(r)
+			continue
+		}
+		break
+	}
+	return b.String()
+}
+
+func isCJKNumeral(r rune) bool {
+	switch r {
+	case '零', '〇', '一', '二', '三', '四', '五', '六', '七', '八', '九',
+		'十', '百', '千', '万':
+		return true
+	}
+	return false
+}
+
+// parseNumeralRun converts a pure numeral run (ASCII or CJK) into an
+// int. Supports CJK positional notation up to 万 (10000-class books
+// are vanishingly rare). The classical "implicit leading one" rule
+// is honoured — `十` parses as 10, `十一` as 11, `百` as 100. Returns
+// (0, false) on unparseable input.
+func parseNumeralRun(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	// ASCII fast path — handles "1", "12", "1234", etc.
+	if isAllASCIIDigits(s) {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			return 0, false
+		}
+		return n, true
+	}
+	cjkDigit := map[rune]int{
+		'零': 0, '〇': 0,
+		'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+		'六': 6, '七': 7, '八': 8, '九': 9,
+	}
+	cjkUnit := map[rune]int{
+		'十': 10, '百': 100, '千': 1000, '万': 10000,
+	}
+	total := 0
+	current := 0
+	runes := []rune(s)
+	for i, r := range runes {
+		if d, ok := cjkDigit[r]; ok {
+			current = d
+			continue
+		}
+		if u, ok := cjkUnit[r]; ok {
+			// Leading unit ("十" → 10, "百" → 100, …) carries an
+			// implicit 1. Also treat units right after a zero
+			// ("一百零五" — already handled by current=5 above; this
+			// branch is for sequences like "十" alone).
+			if current == 0 && (i == 0 || runes[i-1] == '零' || runes[i-1] == '〇') {
+				current = 1
+			}
+			total += current * u
+			current = 0
+			continue
+		}
+		return 0, false
+	}
+	total += current
+	if total == 0 {
+		return 0, false
+	}
+	return total, true
+}
+
+func isAllASCIIDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // TxtMetadata is what DetectMetadata harvests from a file's leading
