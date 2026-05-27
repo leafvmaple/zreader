@@ -1,0 +1,80 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "vite: dev",
+      "type": "shell",
+      "command": "pnpm dev",
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": {
+          "regexp": "^([^\\s].*)\\((\\d+|\\d+,\\d+|\\d+,\\d+,\\d+,\\d+)\\):\\s+(error|warning|info)\\s+(.*)$",
+          "file": 1,
+          "location": 2,
+          "severity": 3,
+          "message": 4
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*VITE\\s+v?[\\d.]+.*",
+          "endsPattern": ".*(ready in|Local:).*"
+        }
+      }
+    },
+    {
+      "label": "vite: stop",
+      "type": "shell",
+      "command": "echo vite task terminated by debugger postDebugTask",
+      "presentation": { "reveal": "silent", "panel": "dedicated" }
+    },
+    {
+      "label": "backend: go test ./...",
+      "type": "shell",
+      "command": "go test ./...",
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "backend: go test library -v",
+      "type": "shell",
+      "command": "go test ./internal/library -v",
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": "test",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "docker: compose up --build",
+      "type": "shell",
+      "command": "$env:DOCKER_BUILDKIT='0'; docker compose up -d --build",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: compose logs -f",
+      "type": "shell",
+      "command": "docker compose logs -f",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: compose down",
+      "type": "shell",
+      "command": "docker compose down",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}

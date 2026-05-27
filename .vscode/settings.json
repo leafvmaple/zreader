@@ -1,0 +1,42 @@
+{
+  "go.testFlags": ["-v"],
+  "go.testTimeout": "60s",
+  "go.coverOnSave": false,
+  "go.lintOnSave": "package",
+  "gopls": {
+    "ui.semanticTokens": true,
+    "formatting.gofumpt": false
+  },
+  "[go]": {
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+  "[typescript]": {
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "files.associations": {
+    "Dockerfile*": "dockerfile",
+    "docker-compose*.yml": "dockercompose"
+  },
+  "files.exclude": {
+    "**/.tmp_*.json": true,
+    "backend/data": true,
+    "backend/cache": true,
+    "backend/log": true,
+    "frontend/dist": true,
+    "frontend/node_modules": true,
+    "backend/internal/webui/dist": true
+  },
+  "search.exclude": {
+    "**/books": true,
+    "**/data": true,
+    "**/.tmp_*.json": true
+  }
+}
