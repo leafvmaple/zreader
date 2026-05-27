@@ -13,6 +13,47 @@ productive in 30 seconds.
 embedded React SPA, single binary / single container, sqlite-backed.
 Single-user by default; the user is whoever the request comes from.
 
+## Privacy — corpus content stays out of the repo
+
+The user's `books/` directory is private. **None of its contents
+belong in source control — not in commit messages, not in code, not
+in tests, not in docs, not in PR descriptions.** Specifically off
+limits:
+
+- **Book titles** and **author names** harvested from the user's
+  library — whether from filenames, from `by:` lines, or from
+  anywhere else. Treat them like API keys: never echo them back into
+  any tracked artefact.
+- **Chapter titles** and **body text** from those books. Quoted
+  prose, specific 章/折/回 names, sample paragraphs — all private.
+- **Per-book numeric fingerprints** that pin a specific source
+  (e.g. "the 217-chapter book", "char_count 63833 → 63816").
+  Structural invariants are fine when they don't identify the source
+  — "≥10 chapters", "char_count drops by the stripped paragraphs"
+  works; precise pre/post numbers don't.
+
+When you need a concrete example, use synthetic stand-ins:
+
+- ASCII placeholders — `BookA`, `AuthorX`, `<title>`, `<author>`.
+- Synthetic CJK from neutral vocabularies — 天干 (`甲乙丙丁戊己庚辛`),
+  地支 (`子丑寅卯辰巳`), 四季方位 (`东南西北春夏秋冬`). Obvious
+  composites that wouldn't be mistaken for a real title.
+- Generic chapter markers (`第一章`, `「一」`, `楔子`, `Chapter N`)
+  are fine — they're structural categories shared across many books,
+  not corpus identifiers.
+
+The corpus regression test (`TestFormatToCache_Corpus` in
+`format_test.go`) reads its assertions from a JSON config pointed at
+by `$ZREADER_TEST_CORPUS`. **That config file is the only place real
+corpus identifiers live** — gitignored, kept locally by the user.
+See `backend/internal/library/testdata/corpus.example.json` for the
+schema.
+
+**Why this matters.** A leak in a commit message is expensive to
+undo: even after `git filter-branch` + force-push, GitHub keeps the
+unreachable commit reachable by SHA for ~30–90 days. Don't write it
+in the first place — it's much cheaper than scrubbing it later.
+
 ## Layout
 
 ```
@@ -174,6 +215,10 @@ parser-side fix.
 
 ## Conventions
 
+- **Privacy first.** Before writing any text that will be committed
+  (code, commit message, doc, test, PR body), check it against the
+  "corpus content stays out of the repo" rule at the top. When in
+  doubt, use synthetic placeholders.
 - **Commits** are conventional (`feat(scope): …`, `docs(scope): …`,
   `chore: …`). See git log for style.
 - **Comments**: don't add comments unless the WHY is non-obvious.
