@@ -11,7 +11,7 @@ func TestFormatText_IndentedRejoin(t *testing.T) {
 	in := "　　第一段开头\n硬包到第二行\n硬包到第三行\n\n　　第二段开头\n硬包行\n"
 	// Output paragraphs are flush-left — the reader handles visual indent.
 	want := "第一段开头硬包到第二行硬包到第三行\n\n第二段开头硬包行\n"
-	got := FormatText(in)
+	got := FormatText(in, "", "")
 	if got != want {
 		t.Errorf("FormatText:\n got %q\nwant %q", got, want)
 	}
@@ -21,7 +21,7 @@ func TestFormatText_NoIndentConvention_NoOp(t *testing.T) {
 	// Without indented paragraph starts we can't distinguish wrap from
 	// real breaks — return text unchanged.
 	in := "line one\nline two\nline three\n"
-	if got := FormatText(in); got != in {
+	if got := FormatText(in, "", ""); got != in {
 		t.Errorf("expected no-op for unindented file, got %q", got)
 	}
 }
@@ -29,7 +29,7 @@ func TestFormatText_NoIndentConvention_NoOp(t *testing.T) {
 func TestFormatText_CRLFCollapsedToLF(t *testing.T) {
 	in := "　　段落一\r\n硬包\r\n\r\n　　段落二\r\n"
 	want := "段落一硬包\n\n段落二\n"
-	if got := FormatText(in); got != want {
+	if got := FormatText(in, "", ""); got != want {
 		t.Errorf("FormatText:\n got %q\nwant %q", got, want)
 	}
 }
@@ -37,26 +37,42 @@ func TestFormatText_CRLFCollapsedToLF(t *testing.T) {
 func TestFormatText_ExtraBlanksNormalised(t *testing.T) {
 	in := "　　段落一\n\n\n\n　　段落二\n"
 	want := "段落一\n\n段落二\n"
-	if got := FormatText(in); got != want {
+	if got := FormatText(in, "", ""); got != want {
 		t.Errorf("FormatText:\n got %q\nwant %q", got, want)
 	}
 }
 
 func TestFormatText_DropsMetadataHeader(t *testing.T) {
+	const title, author = "铸蝉记", "轩辕悬"
 	cases := []struct {
 		name string
 		in   string
 		want string
 	}{
 		{
-			name: "title + by:author paragraph dropped",
-			in:   "　　铸蝉记\n\n　　铸蝉记 by:轩辕悬\n\n　　楔子\n\n　　正文第一段。\n",
-			want: "铸蝉记\n\n楔子\n\n正文第一段。\n",
+			name: "title alone dropped",
+			in:   "　　铸蝉记\n\n　　楔子\n\n　　正文第一段。\n",
+			want: "楔子\n\n正文第一段。\n",
 		},
 		{
-			name: "bare by:author paragraph dropped",
-			in:   "　　铸蝉记\n\n　　by:轩辕悬\n\n　　第一章\n",
-			want: "铸蝉记\n\n第一章\n",
+			name: "author alone dropped",
+			in:   "　　轩辕悬\n\n　　楔子\n",
+			want: "楔子\n",
+		},
+		{
+			name: "title + space + author dropped",
+			in:   "　　铸蝉记 轩辕悬\n\n　　楔子\n",
+			want: "楔子\n",
+		},
+		{
+			name: "title + by:author dropped",
+			in:   "　　铸蝉记 by:轩辕悬\n\n　　楔子\n",
+			want: "楔子\n",
+		},
+		{
+			name: "bare by:author dropped",
+			in:   "　　by:轩辕悬\n\n　　第一章\n",
+			want: "第一章\n",
 		},
 		{
 			name: "full-width colon variant dropped",
@@ -64,18 +80,39 @@ func TestFormatText_DropsMetadataHeader(t *testing.T) {
 			want: "楔子\n",
 		},
 		{
-			name: "long body sentence with by: substring preserved",
-			// > 40 runes — over the cap, so the metadata filter must not
-			// strip it even though the line technically matches
-			// AuthorByPattern (defensive against translated / bilingual
-			// body text that happens to contain `by:`).
-			in:   "　　这是一段足够长的正文段落示例，里面恰巧出现了 by: 这个英文标记片段，但它绝对不应该被当作元数据行而被删除掉。\n",
-			want: "这是一段足够长的正文段落示例，里面恰巧出现了 by: 这个英文标记片段，但它绝对不应该被当作元数据行而被删除掉。\n",
+			name: "title bare-colon author dropped",
+			in:   "　　铸蝉记：轩辕悬\n\n　　楔子\n",
+			want: "楔子\n",
+		},
+		{
+			name: "title 作者：author dropped",
+			in:   "　　铸蝉记 作者：轩辕悬\n\n　　楔子\n",
+			want: "楔子\n",
+		},
+		{
+			name: "Author: english label dropped",
+			in:   "　　铸蝉记 Author:轩辕悬\n\n　　楔子\n",
+			want: "楔子\n",
+		},
+		{
+			name: "title prefix with extra body preserved",
+			in:   "　　铸蝉记这是一段正文。\n",
+			want: "铸蝉记这是一段正文。\n",
+		},
+		{
+			name: "wrong author after by: marker preserved",
+			in:   "　　by:别人\n",
+			want: "by:别人\n",
+		},
+		{
+			name: "by: substring inside body sentence preserved",
+			in:   "　　她在路上听见有人喊 by: 是英文片段，但绝不应该被当作元数据。\n",
+			want: "她在路上听见有人喊 by: 是英文片段，但绝不应该被当作元数据。\n",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FormatText(tc.in)
+			got := FormatText(tc.in, title, author)
 			if got != tc.want {
 				t.Errorf("FormatText:\n got %q\nwant %q", got, tc.want)
 			}
@@ -131,7 +168,7 @@ func TestFormatText_TitleSplitsFromBody(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FormatText(tc.in)
+			got := FormatText(tc.in, "", "")
 			if got != tc.want {
 				t.Errorf("FormatText:\n got %q\nwant %q", got, tc.want)
 			}

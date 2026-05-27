@@ -108,7 +108,7 @@ func FormatToCache(folder, sourcePath string) (cachedPath, title, author string,
 	meta := DetectMetadata(text)
 	title, author = ResolveMetadata(filepath.Base(sourcePath), meta)
 
-	formatted := FormatText(text)
+	formatted := FormatText(text, title, author)
 
 	cachedPath = CachedPath(folder, author, title)
 	if err := os.MkdirAll(filepath.Dir(cachedPath), 0o755); err != nil {
@@ -232,7 +232,12 @@ var chapterSplitPrecedes = map[rune]struct{}{
 // (see usesIndentedParagraphs) text is returned unchanged — without an
 // indent signal we can't safely tell a wrap break from a real paragraph
 // break.
-func FormatText(text string) string {
+// FormatText takes the raw decoded text plus the resolved title and
+// author so it can drop standalone metadata lines that exactly equal
+// those tokens (see isMetadataLine). Pass `""` for title/author to
+// disable the metadata-line filter — useful for tests that exercise
+// the format pipeline in isolation.
+func FormatText(text, title, author string) string {
 	if !usesIndentedParagraphs(text) {
 		return text
 	}
@@ -257,7 +262,7 @@ func FormatText(text string) string {
 				if sub == "" {
 					continue
 				}
-				if isMetadataLine(sub) {
+				if isMetadataLine(sub, title, author) {
 					continue
 				}
 				if !first {
@@ -272,27 +277,80 @@ func FormatText(text string) string {
 	return b.String()
 }
 
-// metadataLineMaxRunes caps the length of a paragraph eligible for
-// the metadata-line filter (see isMetadataLine). Real title/author
-// headers are short — capping at 40 runes keeps the filter from
-// stripping a body sentence that happens to contain the substring
-// `by:` (rare in CJK prose but possible in bilingual / translated
-// text). Pick a value comfortably above the longest plausible
-// "<title> by:<author>" header.
-const metadataLineMaxRunes = 40
+// metadataTokenSeparators is the set of whitespace runes (ASCII space,
+// tab, full-width space `　`) accepted between metadata tokens on a
+// standalone title/author line.
+const metadataTokenSeparators = " \t　"
 
-// isMetadataLine reports whether a trimmed paragraph is a standalone
-// title/author header like `铸蝉记 by:轩辕悬` or `by:轩辕悬` that some
-// web-novel TXTs put between the title page and the first chapter.
-// DetectMetadata already harvests title + author from the same form
-// (against the raw text, before FormatText runs), so dropping the line
-// from the formatted output doesn't lose anything — it just stops the
-// metadata leaking into the reader as a body paragraph.
-func isMetadataLine(paragraph string) bool {
-	if utf8.RuneCountInString(paragraph) > metadataLineMaxRunes {
+// metadataAuthorMarker matches the optional marker that introduces an
+// author name on a metadata line: `by:` / `By:` / `BY:` (ascii or
+// full-width colon), the Chinese `作者：` / `作者:` label, or a bare
+// colon used as a "<Title>：<Author>" separator. Anchored at the start
+// of the remainder so it never strips a colon that just happens to
+// sit later in a body paragraph.
+var metadataAuthorMarker = regexp.MustCompile(`^(?i)(by\s*[:：]|author\s*[:：]|作者\s*[:：]|[:：])`)
+
+// isMetadataLine reports whether the trimmed paragraph is composed
+// only of the resolved metadata tokens — any combination of the exact
+// title and the exact author (with an optional author marker between
+// them), separated by whitespace. The paragraph must be consumed in
+// full; any leftover content disqualifies it.
+//
+// The rule is: this paragraph carries no body meaning, so the reader
+// shouldn't see it. A line that contains only the title, only the
+// author, both, or either preceded by an author marker (`by:`,
+// `作者：`, bare `：`, …) is dropped.
+//
+// Matches (title="铸蝉记", author="轩辕悬"):
+//
+//	铸蝉记                  → title alone
+//	轩辕悬                  → author alone
+//	铸蝉记 轩辕悬           → title + author (no marker)
+//	铸蝉记 by:轩辕悬        → title + by:author
+//	铸蝉记：轩辕悬          → title:author (bare colon)
+//	铸蝉记 作者：轩辕悬     → title + 作者:author
+//	by:轩辕悬               → author marker + author
+//	作者：轩辕悬            → 作者:author
+//
+// Doesn't match (preserved as body):
+//
+//	铸蝉记这是正文           → title prefix but extra body
+//	by:别人                  → wrong author after marker
+//	她说 by:领导的命令       → author marker mid-sentence, no anchor
+//	某天                     → unrelated body line
+//
+// Pass empty title/author to disable the corresponding token — used
+// by tests that don't go through ResolveMetadata.
+func isMetadataLine(paragraph, title, author string) bool {
+	rest := strings.TrimSpace(paragraph)
+	if rest == "" {
 		return false
 	}
-	return AuthorByPattern.MatchString(paragraph)
+	matched := false
+
+	// Optional leading title — exact-match via HasPrefix. The trailing
+	// author check enforces that any post-title remainder is consumed,
+	// so a body paragraph starting with the title then continuing into
+	// prose won't false-positive.
+	if title != "" && strings.HasPrefix(rest, title) {
+		rest = strings.TrimLeft(rest[len(title):], metadataTokenSeparators)
+		matched = true
+	}
+
+	// Optional author marker. Anchored at the start of the remainder
+	// so it doesn't strip a colon that just happens to sit later in
+	// a body sentence.
+	if loc := metadataAuthorMarker.FindStringIndex(rest); loc != nil && loc[0] == 0 {
+		rest = strings.TrimLeft(rest[loc[1]:], metadataTokenSeparators)
+	}
+
+	// Optional exact author suffix.
+	if author != "" && rest == author {
+		rest = ""
+		matched = true
+	}
+
+	return matched && rest == ""
 }
 
 // splitTitleFromBody splits a paragraph that opens with a structured
