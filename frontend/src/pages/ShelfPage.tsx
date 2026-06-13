@@ -169,7 +169,7 @@ export function ShelfPage() {
         ) : filtered.length === 0 ? (
           <p className="shelf__empty">
             {books.length === 0
-              ? '书库为空。点击右上「扫描书库」抓取已授权目录里的 .txt 文件。'
+              ? '书库为空。点击右上「扫描书库」抓取已授权目录里的 .txt / .epub / .pdf 文件。'
               : '没有匹配的结果。'}
           </p>
         ) : (

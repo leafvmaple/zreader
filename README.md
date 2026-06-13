@@ -1,10 +1,12 @@
 # zreader
 
-A self-hosted TXT reader. Point it at a directory of `.txt` files; it scans,
-detects encoding, parses chapters, and gives you a web reader with
+A self-hosted ebook reader. Point it at a directory of `.txt`, `.epub`, or
+text-layer `.pdf` files; it scans, detects/normalises text, parses chapters,
+and gives you a web reader with
 cross-device progress sync. Single binary, single ~23 MB container.
 
-> Status: **MVP**. TXT only for now. EPUB / PDF / MOBI are on the roadmap.
+> Status: **MVP**. TXT, EPUB, and text-layer PDF are supported. Image-only
+> PDFs need OCR or a page-image reader mode and are not imported yet.
 
 ## Quick start
 
@@ -81,7 +83,10 @@ can write to it.
 
 ## What works
 
-- TXT only (UTF-8 BOM / UTF-8 / GBK / GB18030 / pure ASCII auto-detect)
+- TXT (UTF-8 BOM / UTF-8 / GBK / GB18030 / pure ASCII auto-detect)
+- EPUB import via the same cached-EPUB reader used internally.
+- Text-layer PDF import: extracted text is normalised through the TXT chapter
+  parser, then cached as EPUB.
 - Chapter parsing: Chinese `第X章/节/回/卷`, English `Chapter N`, bracketed
   CJK numerals (`「一」`, `【3】`, `〈12〉`). Falls back to a single "正文"
   chapter when no markers are found.
@@ -98,7 +103,9 @@ can write to it.
   Tailscale, etc.). Inside your homelab on a trusted network it's fine.
 - Single user. The schema has a `user_id` column but everyone is `default`
   in this mode.
-- EPUB / PDF / MOBI not supported yet.
+- Image-only/scanned PDFs are detected but not imported; they need local OCR
+  or a dedicated page-image reading mode.
+- MOBI not supported yet.
 
 ## Reverse proxy example (Caddy)
 

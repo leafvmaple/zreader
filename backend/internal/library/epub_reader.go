@@ -76,15 +76,15 @@ func ReadEpub(epubPath string) (*EpubBook, error) {
 		}
 	}
 
-	// hrefLevels maps a manifest href (the EXACT string in OPF) to its
-	// nav-derived depth (0-indexed). Missing entries (no nav doc, or
-	// href not listed in nav) default to Level=0 — treat as flat.
-	hrefLevels := map[string]int{}
+	// hrefNav maps a manifest href (the EXACT string in OPF) to its
+	// nav-derived depth/title. Missing entries default to Level=0 and
+	// chapter-local heading titles.
+	hrefNav := map[string]epubNavEntry{}
 	if navHref != "" {
 		navFullPath := joinEpubPath(opfDir, navHref)
-		levels, err := readNavLevels(&zrc.Reader, navFullPath)
+		navItems, err := readNavItems(&zrc.Reader, navFullPath)
 		if err == nil {
-			hrefLevels = levels
+			hrefNav = navItems
 		}
 	}
 
@@ -101,6 +101,14 @@ func ReadEpub(epubPath string) (*EpubBook, error) {
 		title, paras, err := readChapterXHTML(&zrc.Reader, chapPath)
 		if err != nil {
 			return nil, fmt.Errorf("read chapter %s: %w", chapPath, err)
+		}
+		if title == "" {
+			if nav, ok := hrefNav[href]; ok {
+				title = nav.Title
+			}
+		}
+		if title == "" {
+			title = fmt.Sprintf("Chapter %d", i+1)
 		}
 
 		if i > 0 {
@@ -119,8 +127,8 @@ func ReadEpub(epubPath string) (*EpubBook, error) {
 		}
 
 		level := 0
-		if l, ok := hrefLevels[href]; ok {
-			level = l
+		if nav, ok := hrefNav[href]; ok {
+			level = nav.Level
 		}
 
 		chapters = append(chapters, Chapter{
@@ -224,26 +232,29 @@ func readOPF(z *zip.Reader, opfPath string) (*opfPackage, error) {
 	return &p, nil
 }
 
-// readNavLevels walks the nav.xhtml token stream and returns a map of
-// chapter href → 0-indexed nesting depth. Depth is the count of open
-// `<li>` ancestors at the time the `<a href>` is encountered, minus
-// one — outermost list items are Level=0, items nested under another
-// `<li>` are Level=1, doubly-nested are Level=2, etc. Hrefs are
-// returned exactly as written in the nav doc, with URL fragments
-// stripped, so the caller can match them against manifest entries
-// directly.
+type epubNavEntry struct {
+	Level int
+	Title string
+}
+
+// readNavItems walks the nav.xhtml token stream and returns href-indexed
+// depth/title metadata. Depth is the count of open `<li>` ancestors at the
+// time the `<a href>` is encountered, minus one. Hrefs are returned exactly as
+// written in the nav doc, with URL fragments stripped, so the caller can match
+// them against manifest entries directly.
 //
-// When the same href appears more than once (rare, but possible in
-// hand-authored EPUBs), the FIRST occurrence wins — that's the
-// canonical anchor for the chapter.
-func readNavLevels(z *zip.Reader, navPath string) (map[string]int, error) {
+// When the same href appears more than once, the first occurrence wins.
+func readNavItems(z *zip.Reader, navPath string) (map[string]epubNavEntry, error) {
 	raw, err := readZipFile(z, navPath)
 	if err != nil {
 		return nil, fmt.Errorf("read nav: %w", err)
 	}
 
-	out := map[string]int{}
+	out := map[string]epubNavEntry{}
 	liDepth := 0 // count of currently-open <li> ancestors
+	captureHref := ""
+	captureLevel := 0
+	var captureText strings.Builder
 
 	dec := xml.NewDecoder(bytes.NewReader(raw))
 	dec.Strict = false
@@ -270,25 +281,45 @@ func readNavLevels(z *zip.Reader, navPath string) (map[string]int, error) {
 							if i := strings.IndexByte(href, '#'); i >= 0 {
 								href = href[:i]
 							}
-							if _, exists := out[href]; !exists {
-								out[href] = liDepth - 1
+							if href != "" {
+								captureHref = href
+								captureLevel = liDepth - 1
+								captureText.Reset()
 							}
 						}
 					}
 				}
 			}
+		case xml.CharData:
+			if captureHref != "" {
+				captureText.Write(t)
+			}
 		case xml.EndElement:
-			if strings.ToLower(t.Name.Local) == "li" && liDepth > 0 {
-				liDepth--
+			switch strings.ToLower(t.Name.Local) {
+			case "a":
+				if captureHref != "" {
+					if _, exists := out[captureHref]; !exists {
+						out[captureHref] = epubNavEntry{
+							Level: captureLevel,
+							Title: strings.TrimSpace(collapseSpaces(captureText.String())),
+						}
+					}
+					captureHref = ""
+					captureText.Reset()
+				}
+			case "li":
+				if liDepth > 0 {
+					liDepth--
+				}
 			}
 		}
 	}
 	return out, nil
 }
 
-// readChapterXHTML returns the chapter title (text of the first <h1>)
+// readChapterXHTML returns the chapter title (text of the first heading)
 // and the ordered list of paragraph texts (one entry per <p>). Inline
-// children inside <h1>/<p> collapse to their text content. <h1>-less
+// children inside headings/<p> collapse to their text content. Heading-less
 // chapters return "" as the title — caller can fall back to whatever
 // the manifest / nav offers.
 func readChapterXHTML(z *zip.Reader, xhtmlPath string) (title string, paras []string, err error) {
@@ -316,7 +347,7 @@ func readChapterXHTML(z *zip.Reader, xhtmlPath string) (title string, paras []st
 		case xml.StartElement:
 			if capture == "" {
 				name := strings.ToLower(t.Name.Local)
-				if name == "h1" || name == "p" {
+				if isHTMLHeading(name) || name == "p" {
 					capture = name
 					buf.Reset()
 				}
@@ -325,7 +356,7 @@ func readChapterXHTML(z *zip.Reader, xhtmlPath string) (title string, paras []st
 			if capture != "" && strings.ToLower(t.Name.Local) == capture {
 				txt := strings.TrimSpace(collapseSpaces(buf.String()))
 				if txt != "" {
-					if capture == "h1" && title == "" {
+					if isHTMLHeading(capture) && title == "" {
 						title = txt
 					} else if capture == "p" {
 						paras = append(paras, txt)
@@ -340,6 +371,15 @@ func readChapterXHTML(z *zip.Reader, xhtmlPath string) (title string, paras []st
 		}
 	}
 	return title, paras, nil
+}
+
+func isHTMLHeading(name string) bool {
+	switch name {
+	case "h1", "h2", "h3", "h4", "h5", "h6":
+		return true
+	default:
+		return false
+	}
 }
 
 // --- Flat-text cache -----------------------------------------------------

@@ -7,6 +7,7 @@ require (
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d
 	golang.org/x/text v0.37.0
 	modernc.org/sqlite v1.50.1
+	rsc.io/pdf v0.1.1
 )
 
 require (

@@ -3,6 +3,15 @@
 Running list of small things deferred during normal work. Add a line when
 something is worth remembering but not worth fixing inline.
 
+## PDF — image-only sources need OCR or page-image mode
+
+`backend/internal/library/pdf.go`
+
+Text-layer PDFs import through the normal text pipeline. Scanned/image-only
+PDFs currently fail fast with `ErrPDFNoText`; supporting them needs either a
+local OCR pass before `FormatText` or a separate page-image reader/progress
+model.
+
 ## Format — asymmetric subtitle over-splits
 
 `backend/internal/library/format.go`

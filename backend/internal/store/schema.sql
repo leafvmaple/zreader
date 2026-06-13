@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS books (
     path          TEXT    NOT NULL UNIQUE,
     title         TEXT    NOT NULL,
     author        TEXT,
-    format        TEXT    NOT NULL,         -- 'txt' for now
+    format        TEXT    NOT NULL,         -- cached format, currently 'epub'
     encoding      TEXT,                     -- detected source encoding
     size_bytes    INTEGER NOT NULL,
     char_count    INTEGER,                  -- count after decode to UTF-8

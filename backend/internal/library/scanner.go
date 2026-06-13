@@ -27,7 +27,7 @@ type ScanResult struct {
 	Failed   []string `json:"failed,omitempty"`
 }
 
-// Scanner walks a library folder and ingests TXT files into the store.
+// Scanner walks a library folder and ingests supported source files into the store.
 type Scanner struct {
 	Store  *store.Store
 	Logger *log.Logger
@@ -37,8 +37,8 @@ type Scanner struct {
 //
 //	Phase 0 — Migrate: restore legacy `<file>.txt.bak` over `<file>.txt`
 //	          so we always start from the pristine source.
-//	Phase 1 — Format:  for each top-level `*.txt` source, run FormatText
-//	          and write the result to `<folder>/<author>/<title>.txt`.
+//	Phase 1 — Format:  for each top-level source, write/read a canonical
+//	          cached EPUB at `<folder>/<author>/<title>.epub`.
 //	          Sources themselves are never modified.
 //	Phase 2 — Ingest:  upsert each cached file into the store and
 //	          (re-)parse its chapters.
@@ -94,7 +94,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 			}
 			return nil
 		}
-		if !strings.EqualFold(filepath.Ext(d.Name()), ".txt") {
+		if !IsSupportedSource(d.Name()) {
 			return nil
 		}
 		// Sources live at the top level. Anything under a subdirectory
@@ -108,7 +108,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 			return ctx.Err()
 		}
 
-		cr, err := FormatToCache(folder.Path, path)
+		cr, err := FormatSourceToCache(folder.Path, path)
 		if err != nil {
 			s.warnf("format %s: %v", filepath.Base(path), err)
 			res.Failed = append(res.Failed, path)
@@ -155,12 +155,12 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 
 // ingestFile reads a cached EPUB, derives chapters + char count from
 // its nav + spine, and persists the book row + chapter rows. The
-// source-side metadata (encoding, mtime, byte size, content hash)
-// comes straight from CacheResult — Phase 1 already saw the TXT and
+// source-side metadata (encoding/source marker, mtime, byte size, content hash)
+// comes straight from CacheResult — Phase 1 already saw the source and
 // there's no reason to re-stat it.
 //
-// Book row's Path is the cached EPUB path. Format is "epub" — TXT is
-// only an input format from this layer up.
+// Book row's Path is the cached EPUB path. Format is "epub" — TXT/PDF/EPUB
+// are only input formats from this layer up.
 func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult) (store.Book, bool, error) {
 	name := filepath.Base(cr.Path)
 
@@ -232,6 +232,19 @@ func headHash(src []byte) string {
 	}
 	sum := sha256.Sum256(src)
 	return hex.EncodeToString(sum[:])
+}
+
+func headHashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open source: %w", err)
+	}
+	defer f.Close()
+	head, err := readFirstN(f, 64*1024)
+	if err != nil {
+		return "", err
+	}
+	return headHash(head), nil
 }
 
 func (s *Scanner) infof(format string, args ...any) {
