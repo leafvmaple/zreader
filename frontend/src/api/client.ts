@@ -9,6 +9,7 @@ import type {
   Folder,
   Progress,
   ScanResult,
+  UploadResult,
 } from '../types/api';
 
 export class ApiError extends Error {
@@ -23,7 +24,8 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('Content-Type')) {
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
+  if (init.body && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   const res = await fetch(path, { ...init, headers });
@@ -66,6 +68,20 @@ export async function scan(folderId?: number): Promise<ScanResult[]> {
     body: JSON.stringify(folderId ? { folder_id: folderId } : {}),
   });
   return out.scans ?? [];
+}
+
+export async function uploadBooks(files: File[], folderId?: number): Promise<UploadResult> {
+  const body = new FormData();
+  if (folderId) {
+    body.set('folder_id', String(folderId));
+  }
+  for (const file of files) {
+    body.append('files', file);
+  }
+  return request<UploadResult>('/api/v1/library/upload', {
+    method: 'POST',
+    body,
+  });
 }
 
 // --- Books ------------------------------------------------------------------

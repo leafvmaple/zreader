@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
-import type { Book, Progress } from '../types/api';
+import type { Book, Folder, Progress } from '../types/api';
 import './ShelfPage.css';
 
 type SortKey = 'recent' | 'title' | 'added';
 
 export function ShelfPage() {
   const [books, setBooks] = useState<Book[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [progress, setProgress] = useState<Record<number, Progress>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -15,13 +16,24 @@ export function ShelfPage() {
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('recent');
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadFolderId, setUploadFolderId] = useState<number | undefined>(undefined);
+  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const list = await api.listBooks();
+      const [list, folderList] = await Promise.all([api.listBooks(), api.listFolders()]);
       setBooks(list);
+      setFolders(folderList);
+      setUploadFolderId((current) =>
+        current !== undefined && folderList.some((f) => f.id === current)
+          ? current
+          : folderList[0]?.id,
+      );
       // Fan out progress fetches — fine for a few dozen books; if a library
       // grows past that we'll batch this into a single endpoint.
       const progPairs = await Promise.all(
@@ -36,6 +48,15 @@ export function ShelfPage() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (
+      folders.length > 0 &&
+      (uploadFolderId === undefined || !folders.some((f) => f.id === uploadFolderId))
+    ) {
+      setUploadFolderId(folders[0].id);
+    }
+  }, [folders, uploadFolderId]);
 
   useEffect(() => {
     void refresh();
@@ -62,6 +83,31 @@ export function ShelfPage() {
       setScanBusy(false);
     }
   }, [refresh]);
+
+  const onUpload = useCallback(async () => {
+    if (uploadFiles.length === 0) {
+      setUploadMsg('请选择文件');
+      return;
+    }
+    setUploadBusy(true);
+    setUploadMsg(null);
+    try {
+      const result = await api.uploadBooks(uploadFiles, uploadFolderId);
+      const failed = result.scan.failed?.length ?? 0;
+      if (failed > 0) {
+        setScanMsg(`已上传 ${result.uploaded.length} 个文件，${failed} 个扫描失败`);
+      } else {
+        setScanMsg(`添加完成：新增 ${result.scan.added}，更新 ${result.scan.updated}`);
+        setUploadOpen(false);
+        setUploadFiles([]);
+      }
+      await refresh();
+    } catch (err) {
+      setUploadMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadBusy(false);
+    }
+  }, [refresh, uploadFiles, uploadFolderId]);
 
   // --- Derived views -------------------------------------------------------
 
@@ -130,6 +176,16 @@ export function ShelfPage() {
             <option value="added">最近添加</option>
             <option value="title">按书名</option>
           </select>
+          <button
+            onClick={() => {
+              setUploadOpen(true);
+              setUploadMsg(null);
+            }}
+            disabled={uploadBusy}
+            className="shelf__btn"
+          >
+            添加书籍
+          </button>
           <button onClick={onScan} disabled={scanBusy} className="shelf__btn shelf__btn--primary">
             {scanBusy ? '扫描中…' : '扫描书库'}
           </button>
@@ -206,6 +262,78 @@ export function ShelfPage() {
           </ul>
         )}
       </section>
+
+      {uploadOpen && (
+        <div className="upload-dialog" role="dialog" aria-modal="true" aria-label="添加书籍">
+          <div className="upload-dialog__panel">
+            <header className="upload-dialog__header">
+              <h2>添加书籍</h2>
+              <button
+                type="button"
+                className="upload-dialog__close"
+                onClick={() => setUploadOpen(false)}
+                disabled={uploadBusy}
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </header>
+
+            {folders.length > 1 && (
+              <label className="upload-dialog__field">
+                <span>书库</span>
+                <select
+                  value={uploadFolderId ?? ''}
+                  onChange={(e) => setUploadFolderId(Number(e.target.value))}
+                  disabled={uploadBusy}
+                >
+                  {folders.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.path}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            <label className="upload-dialog__drop">
+              <input
+                type="file"
+                multiple
+                accept=".txt,.epub,.pdf,text/plain,application/epub+zip,application/pdf"
+                disabled={uploadBusy}
+                onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
+              />
+              <span>{uploadFiles.length > 0 ? `${uploadFiles.length} 个文件` : '选择文件'}</span>
+            </label>
+
+            {uploadFiles.length > 0 && (
+              <ul className="upload-dialog__files">
+                {uploadFiles.map((file) => (
+                  <li key={`${file.name}-${file.size}`}>{file.name}</li>
+                ))}
+              </ul>
+            )}
+
+            {folders.length === 0 && <div className="upload-dialog__error">没有可用书库目录</div>}
+            {uploadMsg && <div className="upload-dialog__error">{uploadMsg}</div>}
+
+            <footer className="upload-dialog__actions">
+              <button type="button" className="shelf__btn" onClick={() => setUploadOpen(false)} disabled={uploadBusy}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="shelf__btn shelf__btn--primary"
+                onClick={onUpload}
+                disabled={uploadBusy || uploadFiles.length === 0 || folders.length === 0}
+              >
+                {uploadBusy ? '添加中…' : '添加'}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

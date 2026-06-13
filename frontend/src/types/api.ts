@@ -59,3 +59,14 @@ export type ScanResult = {
   removed: number;
   failed?: string[];
 };
+
+export type UploadedFile = {
+  name: string;
+  path: string;
+  size_bytes: number;
+};
+
+export type UploadResult = {
+  uploaded: UploadedFile[];
+  scan: ScanResult;
+};

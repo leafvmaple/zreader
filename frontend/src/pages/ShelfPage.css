@@ -68,6 +68,123 @@
 
 .shelf__btn:disabled { opacity: 0.6; cursor: progress; }
 
+.upload-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.46);
+}
+
+.upload-dialog__panel {
+  width: min(520px, 100%);
+  max-height: min(680px, calc(100vh - 48px));
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.upload-dialog__header,
+.upload-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.upload-dialog__header {
+  margin-bottom: 16px;
+}
+
+.upload-dialog__header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.upload-dialog__close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.upload-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.upload-dialog__field select {
+  height: 36px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 10px;
+  font: inherit;
+}
+
+.upload-dialog__drop {
+  display: grid;
+  place-items: center;
+  min-height: 112px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.upload-dialog__drop input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.upload-dialog__files {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: 160px;
+  overflow: auto;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.upload-dialog__files li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 0;
+}
+
+.upload-dialog__error {
+  margin-top: 12px;
+  color: #a33;
+  font-size: 13px;
+}
+
+.upload-dialog__actions {
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
 .shelf__notice {
   padding: 10px 14px;
   background: var(--surface);

@@ -33,6 +33,7 @@ func (s *Server) newRouter() http.Handler {
 	mux.HandleFunc("POST /api/v1/library/folders", s.handleAddFolder)
 	mux.HandleFunc("DELETE /api/v1/library/folders/{id}", s.handleDeleteFolder)
 	mux.HandleFunc("POST /api/v1/library/scan", s.handleScan)
+	mux.HandleFunc("POST /api/v1/library/upload", s.handleUploadBooks)
 
 	// Books
 	mux.HandleFunc("GET /api/v1/books", s.handleListBooks)
