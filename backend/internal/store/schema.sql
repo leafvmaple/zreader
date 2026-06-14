@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS books (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     folder_id     INTEGER NOT NULL REFERENCES library_folders(id) ON DELETE CASCADE,
     path          TEXT    NOT NULL UNIQUE,
+    source_path   TEXT,
     title         TEXT    NOT NULL,
     author        TEXT,
     format        TEXT    NOT NULL,         -- cached format, currently 'epub'

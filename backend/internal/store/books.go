@@ -12,6 +12,7 @@ type Book struct {
 	ID           int64
 	FolderID     int64
 	Path         string
+	SourcePath   sql.NullString
 	Title        string
 	Author       sql.NullString
 	Format       string
@@ -53,6 +54,7 @@ func (s *Store) UpsertBook(ctx context.Context, b Book) (int64, bool, error) {
 	res, err := s.db.ExecContext(ctx, `
         UPDATE books
            SET folder_id     = ?,
+               source_path   = ?,
                title         = ?,
                author        = ?,
                format        = ?,
@@ -64,7 +66,7 @@ func (s *Store) UpsertBook(ctx context.Context, b Book) (int64, bool, error) {
                file_hash     = ?,
                scanned_at    = ?
          WHERE path = ?`,
-		b.FolderID, b.Title, b.Author, b.Format, b.Encoding,
+		b.FolderID, b.SourcePath, b.Title, b.Author, b.Format, b.Encoding,
 		b.SizeBytes, b.CharCount, b.ChapterCount, b.FileMtime, b.FileHash, now,
 		b.Path,
 	)
@@ -81,11 +83,11 @@ func (s *Store) UpsertBook(ctx context.Context, b Book) (int64, bool, error) {
 
 	// Not present — insert.
 	res, err = s.db.ExecContext(ctx, `
-        INSERT INTO books(folder_id, path, title, author, format, encoding,
+        INSERT INTO books(folder_id, path, source_path, title, author, format, encoding,
                           size_bytes, char_count, chapter_count, file_mtime,
                           file_hash, added_at, scanned_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		b.FolderID, b.Path, b.Title, b.Author, b.Format, b.Encoding,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		b.FolderID, b.Path, b.SourcePath, b.Title, b.Author, b.Format, b.Encoding,
 		b.SizeBytes, b.CharCount, b.ChapterCount, b.FileMtime, b.FileHash, now, now,
 	)
 	if err != nil {
@@ -131,7 +133,7 @@ func (s *Store) ListBooks(ctx context.Context, folderID int64) ([]Book, error) {
 		err  error
 	)
 	const selectCols = `
-        id, folder_id, path, title, author, format, encoding,
+        id, folder_id, path, source_path, title, author, format, encoding,
         size_bytes, char_count, chapter_count, file_mtime, file_hash,
         added_at, scanned_at`
 
@@ -152,7 +154,7 @@ func (s *Store) ListBooks(ctx context.Context, folderID int64) ([]Book, error) {
 	for rows.Next() {
 		var b Book
 		if err := rows.Scan(
-			&b.ID, &b.FolderID, &b.Path, &b.Title, &b.Author, &b.Format, &b.Encoding,
+			&b.ID, &b.FolderID, &b.Path, &b.SourcePath, &b.Title, &b.Author, &b.Format, &b.Encoding,
 			&b.SizeBytes, &b.CharCount, &b.ChapterCount, &b.FileMtime, &b.FileHash,
 			&b.AddedAt, &b.ScannedAt,
 		); err != nil {
@@ -167,15 +169,29 @@ func (s *Store) ListBooks(ctx context.Context, folderID int64) ([]Book, error) {
 func (s *Store) GetBook(ctx context.Context, id int64) (Book, error) {
 	var b Book
 	err := s.db.QueryRowContext(ctx, `
-        SELECT id, folder_id, path, title, author, format, encoding,
+        SELECT id, folder_id, path, source_path, title, author, format, encoding,
                size_bytes, char_count, chapter_count, file_mtime, file_hash,
                added_at, scanned_at
           FROM books WHERE id = ?`, id).Scan(
-		&b.ID, &b.FolderID, &b.Path, &b.Title, &b.Author, &b.Format, &b.Encoding,
+		&b.ID, &b.FolderID, &b.Path, &b.SourcePath, &b.Title, &b.Author, &b.Format, &b.Encoding,
 		&b.SizeBytes, &b.CharCount, &b.ChapterCount, &b.FileMtime, &b.FileHash,
 		&b.AddedAt, &b.ScannedAt,
 	)
 	return b, err
+}
+
+// DeleteBook removes one book row. Chapters, progress, and bookmarks are
+// removed by ON DELETE CASCADE.
+func (s *Store) DeleteBook(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM books WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // LoadChapters returns chapters of a book ordered by idx ascending.

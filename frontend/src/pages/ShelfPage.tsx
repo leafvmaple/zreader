@@ -5,6 +5,11 @@ import type { Book, Folder, Progress } from '../types/api';
 import './ShelfPage.css';
 
 type SortKey = 'recent' | 'title' | 'added';
+type BookAction = 'reparse' | 'delete';
+
+function baseName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
 
 export function ShelfPage() {
   const [books, setBooks] = useState<Book[]>([]);
@@ -21,6 +26,7 @@ export function ShelfPage() {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadFolderId, setUploadFolderId] = useState<number | undefined>(undefined);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [bookBusy, setBookBusy] = useState<Record<number, BookAction>>({});
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -93,9 +99,12 @@ export function ShelfPage() {
     setUploadMsg(null);
     try {
       const result = await api.uploadBooks(uploadFiles, uploadFolderId);
-      const failed = result.scan.failed?.length ?? 0;
+      const failedList = result.scan.failed ?? [];
+      const failed = failedList.length;
       if (failed > 0) {
-        setScanMsg(`已上传 ${result.uploaded.length} 个文件，${failed} 个扫描失败`);
+        const failedNames = failedList.map(baseName).join('、');
+        setScanMsg(`已上传 ${result.uploaded.length} 个文件，${failed} 个扫描失败：${failedNames}`);
+        setUploadMsg(`以下文件未导入：${failedNames}`);
       } else {
         setScanMsg(`添加完成：新增 ${result.scan.added}，更新 ${result.scan.updated}`);
         setUploadOpen(false);
@@ -108,6 +117,64 @@ export function ShelfPage() {
       setUploadBusy(false);
     }
   }, [refresh, uploadFiles, uploadFolderId]);
+
+  const onReparseBook = useCallback(
+    async (book: Book) => {
+      setBookBusy((prev) => ({ ...prev, [book.id]: 'reparse' }));
+      setScanMsg(null);
+      try {
+        const result = await api.reparseBook(book.id);
+        setScanMsg(`重解析完成：新增 ${result.added}，更新 ${result.updated}`);
+        await refresh();
+      } catch (err) {
+        setScanMsg(`重解析失败：${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setBookBusy((prev) => {
+          const next = { ...prev };
+          delete next[book.id];
+          return next;
+        });
+      }
+    },
+    [refresh],
+  );
+
+  const onDeleteBook = useCallback(
+    async (book: Book) => {
+      const confirmed = window.confirm(`确定删除《${book.title}》吗？这会同时删除源文件和书库记录。`);
+      if (!confirmed) return;
+      setBookBusy((prev) => ({ ...prev, [book.id]: 'delete' }));
+      setScanMsg(null);
+      try {
+        await api.deleteBook(book.id, true);
+        setScanMsg('已删除书籍和源文件');
+        await refresh();
+      } catch (err) {
+        if (err instanceof api.ApiError && err.code === 'source_not_found') {
+          const deleteRecordOnly = window.confirm('源文件没有找到。是否只删除阅读器里的记录和缓存？');
+          if (deleteRecordOnly) {
+            try {
+              await api.deleteBook(book.id, false);
+              setScanMsg('已删除书籍记录和缓存');
+              await refresh();
+              return;
+            } catch (fallbackErr) {
+              setScanMsg(`删除失败：${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
+              return;
+            }
+          }
+        }
+        setScanMsg(`删除失败：${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setBookBusy((prev) => {
+          const next = { ...prev };
+          delete next[book.id];
+          return next;
+        });
+      }
+    },
+    [refresh],
+  );
 
   // --- Derived views -------------------------------------------------------
 
@@ -233,6 +300,7 @@ export function ShelfPage() {
             {filtered.map((b) => {
               const p = progress[b.id];
               const pct = b.char_count ? Math.round(((p?.char_offset ?? 0) / b.char_count) * 100) : 0;
+              const action = bookBusy[b.id];
               return (
                 <li key={b.id} className="book-row">
                   <Link to={`/read/${b.id}`} className="book-row__link">
@@ -256,6 +324,26 @@ export function ShelfPage() {
                     </div>
                     <div className="book-row__cta">{pct > 0 ? '继续阅读' : '开始阅读'}</div>
                   </Link>
+                  <div className="book-row__actions">
+                    <button
+                      type="button"
+                      className="book-row__action"
+                      onClick={() => void onReparseBook(b)}
+                      disabled={action !== undefined}
+                      title="重新解析这本书"
+                    >
+                      {action === 'reparse' ? '解析中…' : '重解析'}
+                    </button>
+                    <button
+                      type="button"
+                      className="book-row__action book-row__action--danger"
+                      onClick={() => void onDeleteBook(b)}
+                      disabled={action !== undefined}
+                      title="删除这本书"
+                    >
+                      {action === 'delete' ? '删除中…' : '删除'}
+                    </button>
+                  </div>
                 </li>
               );
             })}

@@ -38,7 +38,13 @@ func (s *Server) newRouter() http.Handler {
 	// Books
 	mux.HandleFunc("GET /api/v1/books", s.handleListBooks)
 	mux.HandleFunc("GET /api/v1/books/{id}", s.handleGetBook)
+	mux.HandleFunc("DELETE /api/v1/books/{id}", s.handleDeleteBook)
 	mux.HandleFunc("GET /api/v1/books/{id}/content", s.handleBookContent)
+	mux.HandleFunc("GET /api/v1/books/{id}/search", s.handleSearchBook)
+	mux.HandleFunc("POST /api/v1/books/{id}/reparse", s.handleReparseBook)
+	mux.HandleFunc("GET /api/v1/books/{id}/bookmarks", s.handleListBookmarks)
+	mux.HandleFunc("POST /api/v1/books/{id}/bookmarks", s.handleAddBookmark)
+	mux.HandleFunc("DELETE /api/v1/books/{id}/bookmarks/{bookmark_id}", s.handleDeleteBookmark)
 
 	// Reading progress (per-user)
 	mux.HandleFunc("GET /api/v1/progress/{book_id}", s.handleGetProgress)

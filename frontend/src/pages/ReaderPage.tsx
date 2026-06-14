@@ -1,22 +1,66 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as api from '../api/client';
 import { useThrottledProgress } from '../hooks/useThrottledProgress';
-import type { Book, Chapter, Progress } from '../types/api';
+import type { Book, Bookmark, Chapter, Progress, SearchMatch } from '../types/api';
 import './ReaderPage.css';
 
 type Theme = 'beige' | 'white' | 'grey' | 'dark';
 type FontSize = 'sm' | 'md' | 'lg' | 'xl';
 type FontFamily = 'system' | 'songti' | 'wenkai';
+type LineHeight = 'compact' | 'normal' | 'loose';
+type ParagraphGap = 'compact' | 'normal' | 'loose';
+type PageWidth = 'narrow' | 'normal' | 'wide';
+type PageMargin = 'compact' | 'normal' | 'wide';
+type IndentMode = 'indent' | 'flush';
 
-type Settings = { theme: Theme; size: FontSize; font: FontFamily };
+type Settings = {
+  theme: Theme;
+  size: FontSize;
+  font: FontFamily;
+  line: LineHeight;
+  gap: ParagraphGap;
+  width: PageWidth;
+  margin: PageMargin;
+  indent: IndentMode;
+};
 
-const DEFAULT_SETTINGS: Settings = { theme: 'grey', size: 'md', font: 'songti' };
+const DEFAULT_SETTINGS: Settings = {
+  theme: 'grey',
+  size: 'md',
+  font: 'songti',
+  line: 'normal',
+  gap: 'normal',
+  width: 'normal',
+  margin: 'normal',
+  indent: 'indent',
+};
 
 const FONT_LABELS: Record<FontFamily, string> = {
   system: '系统默认',
   songti: '思源宋体',
   wenkai: '霞鹜文楷',
+};
+const LINE_LABELS: Record<LineHeight, string> = {
+  compact: '紧凑',
+  normal: '标准',
+  loose: '宽松',
+};
+const GAP_LABELS: Record<ParagraphGap, string> = {
+  compact: '紧凑',
+  normal: '标准',
+  loose: '宽松',
+};
+const WIDTH_LABELS: Record<PageWidth, string> = {
+  narrow: '窄',
+  normal: '标准',
+  wide: '宽',
+};
+const MARGIN_LABELS: Record<PageMargin, string> = {
+  compact: '窄',
+  normal: '标准',
+  wide: '宽',
 };
 const SETTINGS_KEY = 'zreader.settings';
 
@@ -247,10 +291,18 @@ export function ReaderPage() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
   const [showTOC, setShowTOC] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showBookmarks, setShowBookmarks] = useState(false);
   const [showChrome, setShowChrome] = useState(true);
 
   const [currentChapter, setCurrentChapter] = useState(1);
+  const [currentOffset, setCurrentOffset] = useState(0);
   const [pct, setPct] = useState(0);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchMsg, setSearchMsg] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Set after the initial scroll-to-saved-position fires, so the scroll
@@ -286,18 +338,24 @@ export function ReaderPage() {
     setError(null);
     setChapterText(new Map());
     setLoadedRange(null);
+    setBookmarks([]);
+    setSearchResults([]);
+    setSearchMsg(null);
+    setCurrentOffset(0);
     initialised.current = false;
     fetchingRef.current.clear();
 
     (async () => {
       try {
-        const [{ book, chapters }, progress] = await Promise.all([
+        const [{ book, chapters }, progress, bookmarkList] = await Promise.all([
           api.getBook(bookId),
           api.getProgress(bookId).catch(() => null as Progress | null),
+          api.listBookmarks(bookId).catch(() => [] as Bookmark[]),
         ]);
         if (cancelled) return;
         setBook(book);
         setChapters(chapters);
+        setBookmarks(bookmarkList);
 
         if (chapters.length === 0) {
           setLoading(false);
@@ -316,7 +374,9 @@ export function ReaderPage() {
         // land at scrollTop=0 (the symptom of "opens at chapter top").
         if (progress && progress.char_offset > 0) {
           pendingScrollRef.current = progress.char_offset;
+          setCurrentOffset(progress.char_offset);
         } else {
+          setCurrentOffset(0);
           initialised.current = true;
         }
 
@@ -616,6 +676,7 @@ export function ReaderPage() {
         const range = chapterCharRange(activeIdx, chapters, total);
         const len = range?.len ?? 0;
         const absOffset = Math.min(total, ch.char_offset + Math.floor(within * len));
+        setCurrentOffset(absOffset);
         setPct(Math.round((absOffset / total) * 100));
         report({
           char_offset: absOffset,
@@ -648,9 +709,11 @@ export function ReaderPage() {
         el.scrollBy({ top: -el.clientHeight * 0.9, behavior: 'smooth' });
         e.preventDefault();
       } else if (e.key === 'Escape') {
-        if (showSettings || showTOC) {
+        if (showSettings || showTOC || showSearch || showBookmarks) {
           setShowSettings(false);
           setShowTOC(false);
+          setShowSearch(false);
+          setShowBookmarks(false);
         } else {
           void flush();
           navigate('/');
@@ -663,11 +726,27 @@ export function ReaderPage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [flush, navigate, showSettings, showTOC]);
+  }, [flush, navigate, showBookmarks, showSearch, showSettings, showTOC]);
 
   // --- Click anywhere to toggle chrome ------------------------------------
 
-  const onContentClick = useCallback(() => {
+  const onContentClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button,a,input,select,textarea')) return;
+    if (window.matchMedia('(max-width: 700px)').matches) {
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      if (x < rect.width * 0.32) {
+        el.scrollBy({ top: -el.clientHeight * 0.9, behavior: 'smooth' });
+        return;
+      }
+      if (x > rect.width * 0.68) {
+        el.scrollBy({ top: el.clientHeight * 0.9, behavior: 'smooth' });
+        return;
+      }
+    }
     setShowChrome((v) => !v);
   }, []);
 
@@ -681,6 +760,70 @@ export function ReaderPage() {
     [chapters, jumpToOffset],
   );
 
+  const onSearch = useCallback(async () => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchMsg('请输入搜索内容');
+      setSearchResults([]);
+      return;
+    }
+    setSearchBusy(true);
+    setSearchMsg(null);
+    try {
+      const matches = await api.searchBook(bookId, q);
+      setSearchResults(matches);
+      if (matches.length === 0) {
+        setSearchMsg('没有匹配结果');
+      }
+    } catch (err) {
+      setSearchMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSearchBusy(false);
+    }
+  }, [bookId, searchQuery]);
+
+  const onSearchResultClick = useCallback(
+    (offset: number) => {
+      setShowSearch(false);
+      void jumpToOffset(offset);
+    },
+    [jumpToOffset],
+  );
+
+  const onAddBookmark = useCallback(async () => {
+    if (!book) return;
+    try {
+      const b = await api.addBookmark(bookId, {
+        char_offset: currentOffset,
+        chapter_idx: currentChapter,
+      });
+      setBookmarks((prev) => [...prev, b].sort((a, b) => a.char_offset - b.char_offset));
+      setShowBookmarks(true);
+    } catch (err) {
+      setSearchMsg(err instanceof Error ? err.message : String(err));
+    }
+  }, [book, bookId, currentChapter, currentOffset]);
+
+  const onDeleteBookmark = useCallback(
+    async (bookmarkId: number) => {
+      try {
+        await api.deleteBookmark(bookId, bookmarkId);
+        setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId));
+      } catch (err) {
+        setSearchMsg(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [bookId],
+  );
+
+  const onBookmarkClick = useCallback(
+    (offset: number) => {
+      setShowBookmarks(false);
+      void jumpToOffset(offset);
+    },
+    [jumpToOffset],
+  );
+
   const onResetSettings = useCallback(() => {
     try {
       localStorage.removeItem(SETTINGS_KEY);
@@ -692,7 +835,7 @@ export function ReaderPage() {
 
   // --- Render -------------------------------------------------------------
 
-  const themeClass = `reader reader--theme-${settings.theme} reader--size-${settings.size} reader--font-${settings.font}`;
+  const themeClass = `reader reader--theme-${settings.theme} reader--size-${settings.size} reader--font-${settings.font} reader--line-${settings.line} reader--gap-${settings.gap} reader--width-${settings.width} reader--margin-${settings.margin} reader--indent-${settings.indent}`;
   const currentChapterTitle = chapters.find((c) => c.idx === currentChapter)?.title ?? '';
 
   const renderedChapters: React.ReactNode[] = [];
@@ -727,6 +870,22 @@ export function ReaderPage() {
             <div className="reader__chap-title">{currentChapterTitle}</div>
           </div>
           <div className="reader__icon-btn reader__pct">{pct}%</div>
+          <button
+            className="reader__icon-btn"
+            onClick={() => setShowSearch(true)}
+            aria-label="搜索"
+            title="搜索"
+          >
+            搜索
+          </button>
+          <button
+            className="reader__icon-btn"
+            onClick={onAddBookmark}
+            aria-label="添加书签"
+            title="添加书签"
+          >
+            ☆
+          </button>
           <button
             className="reader__icon-btn"
             onClick={() => setShowSettings(true)}
@@ -766,6 +925,26 @@ export function ReaderPage() {
           >
             目录
           </button>
+          <button
+            className="reader__icon-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowSearch(true);
+            }}
+            aria-label="搜索"
+          >
+            搜索
+          </button>
+          <button
+            className="reader__icon-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowBookmarks(true);
+            }}
+            aria-label="书签"
+          >
+            书签
+          </button>
           <div className="reader__progress-track">
             <div className="reader__progress-fill" style={{ width: `${pct}%` }} />
           </div>
@@ -802,6 +981,101 @@ export function ReaderPage() {
               currentChapter={currentChapter}
               onJump={onChapterClick}
             />
+          </aside>
+        </div>
+      )}
+
+      {/* --- Search drawer ------------------------------------------------- */}
+      {showSearch && (
+        <div className="drawer" onClick={() => setShowSearch(false)}>
+          <aside
+            className="drawer__panel"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="书内搜索"
+          >
+            <header className="drawer__header">
+              <h3>书内搜索</h3>
+              <button className="drawer__close" onClick={() => setShowSearch(false)}>
+                ✕
+              </button>
+            </header>
+            <form
+              className="reader-search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void onSearch();
+              }}
+            >
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索正文"
+              />
+              <button type="submit" disabled={searchBusy}>
+                {searchBusy ? '搜索中…' : '搜索'}
+              </button>
+            </form>
+            {searchMsg && <div className="drawer__message">{searchMsg}</div>}
+            <ul className="search-results">
+              {searchResults.map((m) => (
+                <li key={`${m.char_offset}-${m.chapter_idx}`}>
+                  <button onClick={() => onSearchResultClick(m.char_offset)}>
+                    <span className="search-results__chapter">
+                      {chapters.find((c) => c.idx === m.chapter_idx)?.title ?? `第 ${m.chapter_idx} 章`}
+                    </span>
+                    <span className="search-results__snippet">{m.snippet}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        </div>
+      )}
+
+      {/* --- Bookmark drawer ---------------------------------------------- */}
+      {showBookmarks && (
+        <div className="drawer" onClick={() => setShowBookmarks(false)}>
+          <aside
+            className="drawer__panel"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="书签"
+          >
+            <header className="drawer__header">
+              <h3>书签</h3>
+              <button className="drawer__close" onClick={() => setShowBookmarks(false)}>
+                ✕
+              </button>
+            </header>
+            <div className="bookmark-actions">
+              <button type="button" onClick={onAddBookmark}>
+                添加当前位置
+              </button>
+            </div>
+            {bookmarks.length === 0 ? (
+              <div className="drawer__message">还没有书签</div>
+            ) : (
+              <ul className="bookmark-list">
+                {bookmarks.map((b) => {
+                  const chapterTitle =
+                    chapters.find((c) => c.idx === b.chapter_idx)?.title ??
+                    `位置 ${b.char_offset.toLocaleString()}`;
+                  return (
+                    <li key={b.id}>
+                      <button className="bookmark-list__jump" onClick={() => onBookmarkClick(b.char_offset)}>
+                        <span>{chapterTitle}</span>
+                        <small>{b.char_offset.toLocaleString()} 字</small>
+                      </button>
+                      <button className="bookmark-list__delete" onClick={() => void onDeleteBookmark(b.id)}>
+                        删除
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </aside>
         </div>
       )}
@@ -866,6 +1140,76 @@ export function ReaderPage() {
                       onClick={() => setSettings((s) => ({ ...s, font: f }))}
                     >
                       {FONT_LABELS[f]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings__row">
+                <span className="settings__label">行距</span>
+                <div className="settings__seg">
+                  {(['compact', 'normal', 'loose'] as LineHeight[]).map((v) => (
+                    <button
+                      key={v}
+                      className={settings.line === v ? 'is-active' : ''}
+                      onClick={() => setSettings((s) => ({ ...s, line: v }))}
+                    >
+                      {LINE_LABELS[v]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings__row">
+                <span className="settings__label">段距</span>
+                <div className="settings__seg">
+                  {(['compact', 'normal', 'loose'] as ParagraphGap[]).map((v) => (
+                    <button
+                      key={v}
+                      className={settings.gap === v ? 'is-active' : ''}
+                      onClick={() => setSettings((s) => ({ ...s, gap: v }))}
+                    >
+                      {GAP_LABELS[v]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings__row">
+                <span className="settings__label">页宽</span>
+                <div className="settings__seg">
+                  {(['narrow', 'normal', 'wide'] as PageWidth[]).map((v) => (
+                    <button
+                      key={v}
+                      className={settings.width === v ? 'is-active' : ''}
+                      onClick={() => setSettings((s) => ({ ...s, width: v }))}
+                    >
+                      {WIDTH_LABELS[v]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings__row">
+                <span className="settings__label">边距</span>
+                <div className="settings__seg">
+                  {(['compact', 'normal', 'wide'] as PageMargin[]).map((v) => (
+                    <button
+                      key={v}
+                      className={settings.margin === v ? 'is-active' : ''}
+                      onClick={() => setSettings((s) => ({ ...s, margin: v }))}
+                    >
+                      {MARGIN_LABELS[v]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings__row">
+                <span className="settings__label">首行缩进</span>
+                <div className="settings__seg">
+                  {(['indent', 'flush'] as IndentMode[]).map((v) => (
+                    <button
+                      key={v}
+                      className={settings.indent === v ? 'is-active' : ''}
+                      onClick={() => setSettings((s) => ({ ...s, indent: v }))}
+                    >
+                      {v === 'indent' ? '开启' : '关闭'}
                     </button>
                   ))}
                 </div>

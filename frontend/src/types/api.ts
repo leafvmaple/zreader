@@ -13,6 +13,7 @@ export type Book = {
   id: number;
   folder_id: number;
   path: string;
+  source_path?: string;
   title: string;
   author?: string;
   format: string;
@@ -49,6 +50,21 @@ export type ContentSlice = {
   len: number;
   total_chars: number;
   eof: boolean;
+};
+
+export type SearchMatch = {
+  char_offset: number;
+  chapter_idx: number;
+  snippet: string;
+};
+
+export type Bookmark = {
+  id: number;
+  book_id: number;
+  char_offset: number;
+  chapter_idx?: number;
+  note?: string;
+  created_at: number;
 };
 
 export type ScanResult = {

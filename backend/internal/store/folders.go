@@ -82,6 +82,16 @@ func (s *Store) ListFolders(ctx context.Context) ([]Folder, error) {
 	return out, rows.Err()
 }
 
+// GetFolder fetches one registered library folder by id.
+func (s *Store) GetFolder(ctx context.Context, id int64) (Folder, error) {
+	var f Folder
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, path, added_at, last_scan_at FROM library_folders WHERE id = ?`,
+		id,
+	).Scan(&f.ID, &f.Path, &f.AddedAt, &f.LastScanAt)
+	return f, err
+}
+
 // DeleteFolder removes a folder and (via ON DELETE CASCADE) every book and
 // chapter under it. User progress for those books is also wiped — acceptable
 // for MVP since the user explicitly removed the source.

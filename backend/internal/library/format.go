@@ -128,6 +128,7 @@ func CachedPath(folder, author, title string) string {
 // not the cached EPUB.
 type CacheResult struct {
 	Path        string
+	SourcePath  string
 	Title       string
 	Author      string
 	SourceEnc   string // detected text encoding or source-kind marker
@@ -189,7 +190,9 @@ func FormatToCache(folder, sourcePath string) (CacheResult, error) {
 	meta := DetectMetadata(text)
 	title, author := ResolveMetadata(filepath.Base(sourcePath), meta)
 
-	return writeTextSourceToCache(folder, raw, st, encName, text, title, author)
+	cr, err := writeTextSourceToCache(folder, raw, st, encName, text, title, author)
+	cr.SourcePath = sourcePath
+	return cr, err
 }
 
 // FormatPDFToCache extracts a PDF text layer and feeds it through the same
@@ -212,7 +215,9 @@ func FormatPDFToCache(folder, sourcePath string) (CacheResult, error) {
 	if err != nil {
 		return CacheResult{}, err
 	}
-	return writeTextSourceToCache(folder, nil, st, "pdf-text", extracted.Text, title, author, hash)
+	cr, err := writeTextSourceToCache(folder, nil, st, "pdf-text", extracted.Text, title, author, hash)
+	cr.SourcePath = sourcePath
+	return cr, err
 }
 
 // ImportEpubToCache reads a top-level EPUB source and rewrites it into the
@@ -245,6 +250,7 @@ func ImportEpubToCache(folder, sourcePath string) (CacheResult, error) {
 	}
 	return CacheResult{
 		Path:        cachedPath,
+		SourcePath:  sourcePath,
 		Title:       title,
 		Author:      author,
 		SourceEnc:   "epub",

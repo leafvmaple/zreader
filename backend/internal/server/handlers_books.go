@@ -14,6 +14,7 @@ type bookDTO struct {
 	ID           int64  `json:"id"`
 	FolderID     int64  `json:"folder_id"`
 	Path         string `json:"path"`
+	SourcePath   string `json:"source_path,omitempty"`
 	Title        string `json:"title"`
 	Author       string `json:"author,omitempty"`
 	Format       string `json:"format"`
@@ -41,6 +42,9 @@ func toBookDTO(b store.Book) bookDTO {
 	}
 	if b.Author.Valid {
 		d.Author = b.Author.String
+	}
+	if b.SourcePath.Valid {
+		d.SourcePath = b.SourcePath.String
 	}
 	if b.Encoding.Valid {
 		d.Encoding = b.Encoding.String
@@ -105,8 +109,9 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 
 // handleBookContent serves a slice of the book's plain-text view.
 // Query:
-//   from (char offset, default 0)
-//   len  (chars to return, default 5000, max 50000)
+//
+//	from (char offset, default 0)
+//	len  (chars to return, default 5000, max 50000)
 //
 // The text is reconstructed from the cached EPUB on the fly via
 // library.GetFlatRunes — its in-process cache amortises the EPUB

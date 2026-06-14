@@ -107,6 +107,71 @@ can write to it.
   or a dedicated page-image reading mode.
 - MOBI not supported yet.
 
+## Roadmap
+
+The current release is v0.6: it imports TXT, EPUB, and text-layer PDF sources,
+caches them as EPUB, parses chapters, serves a web reader, syncs single-user
+reading progress, and covers the core daily-reading workflow. The next
+milestones focus on making larger libraries easier to manage and expanding
+format coverage.
+
+### v0.6 — Daily Reader (implemented)
+
+Delivered: normal reading sessions now feel complete enough for daily use.
+
+- In-book search.
+- Bookmarks.
+- More reading layout controls: line height, paragraph spacing, page width,
+  margins, and indentation.
+- Better continue-reading and recently-read surfaces.
+- Per-book delete and re-parse actions.
+- Clear upload/import failure messages in the UI.
+- Mobile reading interaction polish: tap zones and immersive chrome toggle.
+
+### v0.7 — Library Management
+
+Goal: manage tens or hundreds of books without falling back to the filesystem.
+
+- Cover extraction and default cover generation.
+- Editable metadata: title, author, and description.
+- Tags, categories, favorites, and reading status.
+- Duplicate detection.
+- Batch operations for delete, re-scan, and tagging.
+- Import/scan job queue with history, progress, retry, and failure details.
+
+### v0.8 — Format Coverage
+
+Goal: improve import success rate and fidelity.
+
+- Image-only PDF support, starting with a page-image reader mode; OCR can be
+  added after the reading/progress model is in place.
+- Better EPUB fidelity for covers, images, footnotes, and nested navigation.
+- MOBI/AZW3 import.
+- Manual chapter override sidecars for books whose automatic parsing is wrong.
+- Continued PDF text cleanup: reading order, page header/footer filtering, and
+  footnote handling.
+
+### v0.9 — Users and Safety
+
+Goal: make the app safe to share inside a household or small private group.
+
+- Built-in authentication.
+- Multi-user progress, bookmarks, notes, and settings.
+- Admin/user roles.
+- Database and configuration backup/restore.
+- Hardened reverse-proxy deployment docs and safer defaults.
+
+### v1.0 — Stable NAS App
+
+Goal: make upgrades and long-running deployments predictable.
+
+- Stable database migration policy.
+- Large-library performance tests.
+- End-to-end coverage for upload, scan, reading, and progress recovery.
+- Diagnostic log export.
+- Clear release notes, upgrade guidance, and rollback guidance.
+- Stable Docker image, version, and health-check behavior.
+
 ## Reverse proxy example (Caddy)
 
 ```caddy

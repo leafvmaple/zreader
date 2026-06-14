@@ -234,6 +234,16 @@ func (s *Scanner) ScanSourceFiles(ctx context.Context, folder store.Folder, sour
 	return res, nil
 }
 
+// ReparseBook finds the source file that produced b and imports only that
+// source. It is the single-book counterpart to ScanFolder.
+func (s *Scanner) ReparseBook(ctx context.Context, folder store.Folder, b store.Book) (ScanResult, error) {
+	sourcePath, err := FindBookSource(folder.Path, b)
+	if err != nil {
+		return ScanResult{FolderID: folder.ID, Path: folder.Path, Failed: []string{b.Path}}, err
+	}
+	return s.ScanSourceFiles(ctx, folder, []string{sourcePath})
+}
+
 // ingestFile reads a cached EPUB, derives chapters + char count from
 // its nav + spine, and persists the book row + chapter rows. The
 // source-side metadata (encoding/source marker, mtime, byte size, content hash)
@@ -260,6 +270,7 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult
 	book := store.Book{
 		FolderID:     folderID,
 		Path:         cr.Path,
+		SourcePath:   sql.NullString{String: cr.SourcePath, Valid: cr.SourcePath != ""},
 		Title:        cr.Title,
 		Author:       sql.NullString{String: cr.Author, Valid: cr.Author != "" && cr.Author != DefaultAuthor},
 		Format:       "epub",
@@ -301,6 +312,54 @@ func relPath(folder, target string) string {
 		return filepath.ToSlash(r)
 	}
 	return target
+}
+
+// FindBookSource locates the top-level source file that produced a cached
+// book row by matching source size, mtime, and head hash.
+func FindBookSource(folder string, b store.Book) (string, error) {
+	folderPath, err := filepath.Abs(folder)
+	if err != nil {
+		return "", fmt.Errorf("normalise folder: %w", err)
+	}
+	folderPath = filepath.Clean(folderPath)
+
+	if b.SourcePath.Valid && b.SourcePath.String != "" {
+		sourcePath, err := filepath.Abs(b.SourcePath.String)
+		if err == nil {
+			sourcePath = filepath.Clean(sourcePath)
+			if filepath.Dir(sourcePath) == folderPath && IsSupportedSource(filepath.Base(sourcePath)) {
+				if st, err := os.Stat(sourcePath); err == nil && !st.IsDir() {
+					return sourcePath, nil
+				}
+			}
+		}
+	}
+
+	entries, err := os.ReadDir(folderPath)
+	if err != nil {
+		return "", fmt.Errorf("read folder: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !IsSupportedSource(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(folderPath, entry.Name())
+		st, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if st.Size() != b.SizeBytes || st.ModTime().Unix() != b.FileMtime {
+			continue
+		}
+		if b.FileHash.Valid {
+			hash, err := headHashFile(path)
+			if err != nil || hash != b.FileHash.String {
+				continue
+			}
+		}
+		return path, nil
+	}
+	return "", fmt.Errorf("source file not found for book %d", b.ID)
 }
 
 // headHash returns the hex sha256 of up to the first 64 KiB of src. Used

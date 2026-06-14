@@ -4,11 +4,13 @@
 
 import type {
   Book,
+  Bookmark,
   Chapter,
   ContentSlice,
   Folder,
   Progress,
   ScanResult,
+  SearchMatch,
   UploadResult,
 } from '../types/api';
 
@@ -102,6 +104,47 @@ export async function getContent(
   len: number,
 ): Promise<ContentSlice> {
   return request<ContentSlice>(`/api/v1/books/${id}/content?from=${from}&len=${len}`);
+}
+
+export async function searchBook(
+  id: number,
+  query: string,
+  limit = 30,
+): Promise<SearchMatch[]> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const out = await request<{ matches: SearchMatch[] }>(`/api/v1/books/${id}/search?${params}`);
+  return out.matches ?? [];
+}
+
+export async function reparseBook(id: number): Promise<ScanResult> {
+  const out = await request<{ scan: ScanResult }>(`/api/v1/books/${id}/reparse`, {
+    method: 'POST',
+  });
+  return out.scan;
+}
+
+export async function deleteBook(id: number, deleteSource = true): Promise<void> {
+  const source = deleteSource ? 'true' : 'false';
+  await request<void>(`/api/v1/books/${id}?source=${source}`, { method: 'DELETE' });
+}
+
+export async function listBookmarks(bookId: number): Promise<Bookmark[]> {
+  const out = await request<{ bookmarks: Bookmark[] }>(`/api/v1/books/${bookId}/bookmarks`);
+  return out.bookmarks ?? [];
+}
+
+export async function addBookmark(
+  bookId: number,
+  body: Pick<Bookmark, 'char_offset'> & Partial<Pick<Bookmark, 'chapter_idx' | 'note'>>,
+): Promise<Bookmark> {
+  return request<Bookmark>(`/api/v1/books/${bookId}/bookmarks`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteBookmark(bookId: number, bookmarkId: number): Promise<void> {
+  await request<void>(`/api/v1/books/${bookId}/bookmarks/${bookmarkId}`, { method: 'DELETE' });
 }
 
 // --- Progress ---------------------------------------------------------------

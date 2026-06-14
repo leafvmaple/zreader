@@ -54,6 +54,11 @@ func Open(dataDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("add chapters.level: %w", err)
 	}
+	if _, err := db.Exec(`ALTER TABLE books ADD COLUMN source_path TEXT`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		_ = db.Close()
+		return nil, fmt.Errorf("add books.source_path: %w", err)
+	}
 	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version(version) VALUES (1)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("seed schema_version: %w", err)
