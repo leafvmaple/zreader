@@ -95,6 +95,57 @@ func TestBookSearchAndBookmarks(t *testing.T) {
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete bookmark status = %d body=%s", rr.Code, rr.Body.String())
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/bookmarks", nil)
+	rr = httptest.NewRecorder()
+	srv.newRouter().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list bookmarks after delete status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	listed.Bookmarks = nil
+	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode bookmarks after delete: %v", err)
+	}
+	if len(listed.Bookmarks) != 0 {
+		t.Fatalf("bookmarks after delete = %+v, want empty", listed.Bookmarks)
+	}
+}
+
+func TestBookDTOIncludesSourcePath(t *testing.T) {
+	ctx := context.Background()
+	bookDir := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	srv := New(Config{Port: 0, Store: st})
+
+	uploadTestBook(t, srv, "BookA - AuthorX.txt", "Chapter 1\n\nBody paragraph.\n")
+	book := onlyBook(t, st, folder.ID)
+	wantSource := filepath.Join(bookDir, "BookA - AuthorX.txt")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID), nil)
+	rr := httptest.NewRecorder()
+	srv.newRouter().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get book status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Book struct {
+			SourcePath string `json:"source_path"`
+		} `json:"book"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode book: %v", err)
+	}
+	if got.Book.SourcePath != wantSource {
+		t.Fatalf("source_path = %q, want %q", got.Book.SourcePath, wantSource)
+	}
 }
 
 func TestBookReparseUsesPersistedSourcePath(t *testing.T) {
@@ -180,6 +231,93 @@ func TestDeleteBookRemovesSourceAndRow(t *testing.T) {
 	}
 	if len(books) != 0 {
 		t.Fatalf("books = %+v, want empty after delete", books)
+	}
+}
+
+func TestDeleteBookMissingSourceConflictKeepsRow(t *testing.T) {
+	ctx := context.Background()
+	bookDir := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	srv := New(Config{Port: 0, Store: st})
+
+	uploadTestBook(t, srv, "BookA - AuthorX.txt", "Chapter 1\n\nBody paragraph.\n")
+	book := onlyBook(t, st, folder.ID)
+	source := filepath.Join(bookDir, "BookA - AuthorX.txt")
+	if err := os.Remove(source); err != nil {
+		t.Fatalf("remove source: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/books/"+itoa(book.ID)+"?source=true", nil)
+	rr := httptest.NewRecorder()
+	srv.newRouter().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("delete missing source status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if got.Error != "source_not_found" {
+		t.Fatalf("error = %q, want source_not_found", got.Error)
+	}
+	books, err := st.ListBooks(ctx, folder.ID)
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	if len(books) != 1 {
+		t.Fatalf("books = %+v, want row retained after conflict", books)
+	}
+	if _, err := os.Stat(book.Path); err != nil {
+		t.Fatalf("cache missing after source conflict: %v", err)
+	}
+}
+
+func TestDeleteBookRecordOnlyAllowsMissingSource(t *testing.T) {
+	ctx := context.Background()
+	bookDir := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	srv := New(Config{Port: 0, Store: st})
+
+	uploadTestBook(t, srv, "BookA - AuthorX.txt", "Chapter 1\n\nBody paragraph.\n")
+	book := onlyBook(t, st, folder.ID)
+	source := filepath.Join(bookDir, "BookA - AuthorX.txt")
+	if err := os.Remove(source); err != nil {
+		t.Fatalf("remove source: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/books/"+itoa(book.ID)+"?source=false", nil)
+	rr := httptest.NewRecorder()
+	srv.newRouter().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete record-only status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(book.Path); !os.IsNotExist(err) {
+		t.Fatalf("cache still exists or stat failed unexpectedly: %v", err)
+	}
+	books, err := st.ListBooks(ctx, folder.ID)
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	if len(books) != 0 {
+		t.Fatalf("books = %+v, want empty after record-only delete", books)
 	}
 }
 
