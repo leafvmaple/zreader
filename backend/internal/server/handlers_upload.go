@@ -52,6 +52,7 @@ func (s *Server) handleUploadBooks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uploaded := make([]uploadedFileDTO, 0, len(files))
+	sourcePaths := make([]string, 0, len(files))
 	for _, fh := range files {
 		u, err := saveUploadedBook(folder.Path, fh)
 		if err != nil {
@@ -59,10 +60,11 @@ func (s *Server) handleUploadBooks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		uploaded = append(uploaded, u)
+		sourcePaths = append(sourcePaths, u.Path)
 	}
 
 	scanner := &library.Scanner{Store: s.store, Logger: s.cfg.Logger}
-	scan, err := scanner.ScanFolder(r.Context(), folder)
+	scan, err := scanner.ScanSourceFiles(r.Context(), folder, sourcePaths)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "scan_uploaded", err)
 		return

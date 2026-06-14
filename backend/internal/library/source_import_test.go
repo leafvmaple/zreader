@@ -183,6 +183,64 @@ func TestScannerScanFolder_SupportedSourceFormats(t *testing.T) {
 	}
 }
 
+func TestScannerScanSourceFiles_DoesNotPruneExistingBooks(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	bookDir := t.TempDir()
+
+	st, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+
+	existingPath := filepath.Join(bookDir, "Existing - AuthorX.txt")
+	if err := os.WriteFile(existingPath, []byte("Chapter 1\n\nExisting body paragraph.\n"), 0o644); err != nil {
+		t.Fatalf("write existing source: %v", err)
+	}
+
+	scanner := &Scanner{Store: st}
+	if res, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("ScanFolder: %v", err)
+	} else if res.Added != 1 || len(res.Failed) != 0 {
+		t.Fatalf("initial scan result = %+v, want one added", res)
+	}
+
+	if err := os.Remove(existingPath); err != nil {
+		t.Fatalf("remove existing source: %v", err)
+	}
+	newPath := filepath.Join(bookDir, "NewBook - AuthorY.txt")
+	if err := os.WriteFile(newPath, []byte("Chapter 1\n\nNew body paragraph.\n"), 0o644); err != nil {
+		t.Fatalf("write new source: %v", err)
+	}
+
+	res, err := scanner.ScanSourceFiles(ctx, folder, []string{newPath})
+	if err != nil {
+		t.Fatalf("ScanSourceFiles: %v", err)
+	}
+	if res.Added != 1 || res.Removed != 0 || len(res.Failed) != 0 {
+		t.Fatalf("single-source scan result = %+v, want one added and no prune", res)
+	}
+
+	books, err := st.ListBooks(ctx, folder.ID)
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	got := map[string]bool{}
+	for _, b := range books {
+		got[b.Title] = true
+	}
+	for _, title := range []string{"Existing", "NewBook"} {
+		if !got[title] {
+			t.Fatalf("missing title %q; got=%v", title, got)
+		}
+	}
+}
+
 func writeEpubFile(t *testing.T, path, title, author, text string, chapters []Chapter) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

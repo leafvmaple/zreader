@@ -153,6 +153,87 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 	return res, nil
 }
 
+// ScanSourceFiles imports only the provided top-level source files for a
+// folder. It is used by upload flows where the caller already knows exactly
+// which sources changed, so it deliberately skips the folder walk and prune
+// phases used by ScanFolder.
+func (s *Scanner) ScanSourceFiles(ctx context.Context, folder store.Folder, sourcePaths []string) (ScanResult, error) {
+	res := ScanResult{FolderID: folder.ID, Path: folder.Path}
+
+	info, err := os.Stat(folder.Path)
+	if err != nil {
+		return res, fmt.Errorf("stat folder: %w", err)
+	}
+	if !info.IsDir() {
+		return res, fmt.Errorf("%s is not a directory", folder.Path)
+	}
+
+	folderPath, err := filepath.Abs(folder.Path)
+	if err != nil {
+		return res, fmt.Errorf("normalise folder: %w", err)
+	}
+	folderPath = filepath.Clean(folderPath)
+
+	s.infof("folder %d (%s): source scan begin files=%d", folder.ID, folder.Path, len(sourcePaths))
+	defer func() {
+		s.infof("folder %d: source scan done — added=%d updated=%d failed=%d",
+			folder.ID, res.Added, res.Updated, len(res.Failed))
+	}()
+
+	for _, sourcePath := range sourcePaths {
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+		path, err := filepath.Abs(sourcePath)
+		if err != nil {
+			res.Failed = append(res.Failed, sourcePath)
+			s.warnf("normalise source %s: %v", sourcePath, err)
+			continue
+		}
+		path = filepath.Clean(path)
+		if filepath.Dir(path) != folderPath || !IsSupportedSource(filepath.Base(path)) {
+			res.Failed = append(res.Failed, sourcePath)
+			s.warnf("source %s is not a supported top-level file in folder %d", sourcePath, folder.ID)
+			continue
+		}
+		if st, err := os.Stat(path); err != nil {
+			res.Failed = append(res.Failed, path)
+			s.warnf("stat source %s: %v", path, err)
+			continue
+		} else if st.IsDir() {
+			res.Failed = append(res.Failed, path)
+			s.warnf("source %s is a directory", path)
+			continue
+		}
+
+		cr, err := FormatSourceToCache(folderPath, path)
+		if err != nil {
+			s.warnf("format %s: %v", filepath.Base(path), err)
+			res.Failed = append(res.Failed, path)
+			continue
+		}
+		s.infof("format %s → %s (author=%q title=%q enc=%s)",
+			filepath.Base(path), relPath(folderPath, cr.Path), cr.Author, cr.Title, cr.SourceEnc)
+
+		_, isNew, err := s.ingestFile(ctx, folder.ID, cr)
+		if err != nil {
+			s.warnf("ingest %s: %v", cr.Path, err)
+			res.Failed = append(res.Failed, cr.Path)
+			continue
+		}
+		if isNew {
+			res.Added++
+		} else {
+			res.Updated++
+		}
+	}
+
+	if err := s.Store.TouchFolderScan(ctx, folder.ID); err != nil {
+		return res, fmt.Errorf("touch scan: %w", err)
+	}
+	return res, nil
+}
+
 // ingestFile reads a cached EPUB, derives chapters + char count from
 // its nav + spine, and persists the book row + chapter rows. The
 // source-side metadata (encoding/source marker, mtime, byte size, content hash)
