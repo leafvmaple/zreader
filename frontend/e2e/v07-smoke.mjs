@@ -96,7 +96,7 @@ if (!existsSync(distIndex)) {
   throw new Error('frontend dist is missing; run pnpm build before this e2e test');
 }
 
-const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'zreader-v06-e2e-'));
+const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'zreader-v07-e2e-'));
 const dataDir = path.join(tempRoot, 'data');
 const libraryDir = path.join(tempRoot, 'books');
 await mkdir(dataDir, { recursive: true });
@@ -129,11 +129,11 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
   await page.goto(baseURL, { waitUntil: 'networkidle' });
-  assert(await page.locator('.shelf__toolbar button').nth(0).isVisible(), 'add-book button missing');
+  assert(await page.getByRole('button', { name: '添加书籍' }).isVisible(), 'add-book button missing');
 
   const uploadPath = path.join(tempRoot, 'BookA - AuthorX.txt');
   await writeFile(uploadPath, longBookText('OldNeedle'), 'utf8');
-  await page.locator('.shelf__toolbar button').nth(0).click();
+  await page.getByRole('button', { name: '添加书籍' }).click();
   assert(await page.locator('.upload-dialog').isVisible(), 'upload dialog did not open');
   await page.locator('.upload-dialog input[type=file]').setInputFiles(uploadPath);
   await Promise.all([
@@ -142,12 +142,56 @@ try {
   ]);
   await page.waitForSelector('.book-row');
   assert((await page.locator('.book-row').count()) === 1, 'uploaded book row missing');
-  assert((await page.locator('.book-row').first().locator('.book-row__action').count()) === 2, 'book row actions missing');
+  assert((await page.locator('.book-row').first().locator('.book-row__action').count()) === 4, 'book row actions missing');
+
+  const secondUploadPath = path.join(tempRoot, 'BookB - AuthorY.txt');
+  await writeFile(secondUploadPath, longBookText('OldNeedle'), 'utf8');
+  await page.getByRole('button', { name: '添加书籍' }).click();
+  await page.locator('.upload-dialog input[type=file]').setInputFiles(secondUploadPath);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/v1/library/upload') && r.status() === 201),
+    page.locator('.upload-dialog__actions .shelf__btn--primary').click(),
+  ]);
+  await page.waitForFunction(() => document.querySelectorAll('.book-row').length === 2);
+
+  await page.getByRole('button', { name: /重复/ }).click();
+  await page.waitForSelector('.duplicate-list li');
+  assert((await page.locator('.duplicate-list li').count()) === 1, 'duplicate panel did not show duplicate group');
+  await page.locator('.library-panel__close').click();
+
+  await page.locator('.book-row').first().locator('.book-row__action').nth(0).click();
+  await page.locator('.edit-dialog input').nth(0).fill('EditedTitle');
+  await page.locator('.edit-dialog input').nth(1).fill('EditedAuthor');
+  await page.locator('.edit-dialog input').nth(2).fill('CategoryA');
+  await page.locator('.edit-dialog input').nth(3).fill('TagA TagB');
+  await page.locator('.edit-dialog select').selectOption('reading');
+  await page.locator('.edit-dialog__check input').check();
+  await page.locator('.edit-dialog textarea').fill('Short description');
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.request().method() === 'PATCH' && r.status() === 200),
+    page.locator('.edit-dialog .shelf__btn--primary').click(),
+  ]);
+  await page.waitForFunction(() => document.body.textContent.includes('EditedTitle'));
+  assert(await page.locator('.book-row__tags span', { hasText: 'TagA' }).count() > 0, 'edited tags not visible');
+
+  await page.locator('.book-row__select input').nth(0).check();
+  await page.locator('.book-row__select input').nth(1).check();
+  await page.locator('.batch-bar input').fill('BatchTag');
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/v1/books/batch') && r.status() === 200),
+    page.locator('.batch-bar button', { hasText: '打标签' }).click(),
+  ]);
+  await page.waitForFunction(() => document.body.textContent.includes('BatchTag'));
+
+  await page.getByRole('button', { name: '任务' }).click();
+  await page.waitForSelector('.job-list li');
+  assert((await page.locator('.job-list li').count()) > 0, 'job history did not open');
+  await page.locator('.library-panel__close').click();
 
   await writeFile(path.join(libraryDir, 'BookA - AuthorX.txt'), longBookText('FreshNeedle'), 'utf8');
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.url().includes('/reparse') && r.status() === 200),
-    page.locator('.book-row').first().locator('.book-row__action').nth(0).click(),
+    page.locator('.book-row').first().locator('.book-row__action').nth(2).click(),
   ]);
 
   await page.locator('.book-row').first().locator('a.book-row__link').click();
@@ -194,11 +238,11 @@ try {
   page.once('dialog', (dialog) => dialog.accept());
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.request().method() === 'DELETE' && r.status() === 204),
-    page.locator('.book-row').first().locator('.book-row__action').nth(1).click(),
+    page.locator('.book-row').first().locator('.book-row__action').nth(3).click(),
   ]);
-  await page.waitForFunction(() => document.querySelectorAll('.book-row').length === 0);
+  await page.waitForFunction(() => document.querySelectorAll('.book-row').length === 1);
 
-  console.log('v0.6 e2e smoke passed');
+  console.log('v0.7 e2e smoke passed');
 } finally {
   if (browser) await browser.close();
   await stopServer(server);

@@ -63,15 +63,31 @@ func (s *Server) handleUploadBooks(w http.ResponseWriter, r *http.Request) {
 		sourcePaths = append(sourcePaths, u.Path)
 	}
 
-	scanner := &library.Scanner{Store: s.store, Logger: s.cfg.Logger}
-	scan, err := scanner.ScanSourceFiles(r.Context(), folder, sourcePaths)
+	payload := jobPayload{FolderID: folder.ID, SourcePaths: sourcePaths}
+	job, err := s.createJob(r.Context(), "import", "Import uploaded books", payload, folder.ID, 0, int64(len(sourcePaths)))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "scan_uploaded", err)
+		writeError(w, http.StatusInternalServerError, "create_job", err)
 		return
 	}
+	_ = s.store.StartJob(r.Context(), job.ID)
+	results, scanErr := s.runImportPayload(r.Context(), payload)
+	if err := s.store.FinishJob(r.Context(), job.ID, scanResultJobResult(results, scanErr)); err != nil {
+		s.cfg.Logger.Printf("finish job %d: %v", job.ID, err)
+	}
+	done, _ := s.store.GetJob(r.Context(), job.ID)
+	if scanErr != nil {
+		writeError(w, http.StatusInternalServerError, "scan_uploaded", scanErr)
+		return
+	}
+	if len(results) == 0 {
+		writeError(w, http.StatusInternalServerError, "scan_uploaded", fmt.Errorf("scan produced no result"))
+		return
+	}
+	scan := results[0]
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"uploaded": uploaded,
 		"scan":     scan,
+		"job":      toJobDTO(done),
 	})
 }
 

@@ -16,6 +16,13 @@ export type Book = {
   source_path?: string;
   title: string;
   author?: string;
+  description?: string;
+  category?: string;
+  favorite: boolean;
+  reading_status: ReadingStatus;
+  cover_color: string;
+  cover_label: string;
+  tags?: string[];
   format: string;
   encoding?: string;
   size_bytes: number;
@@ -25,6 +32,8 @@ export type Book = {
   added_at: number;
   scanned_at: number;
 };
+
+export type ReadingStatus = 'unread' | 'reading' | 'finished' | 'paused';
 
 export type Chapter = {
   idx: number;
@@ -76,6 +85,37 @@ export type ScanResult = {
   failed?: string[];
 };
 
+export type LibraryJob = {
+  id: number;
+  type: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  label?: string;
+  folder_id?: number;
+  book_id?: number;
+  total: number;
+  completed: number;
+  added: number;
+  updated: number;
+  removed: number;
+  failed?: string[];
+  error?: string;
+  created_at: number;
+  started_at?: number;
+  finished_at?: number;
+};
+
+export type Tag = {
+  id: number;
+  name: string;
+  color?: string;
+  added_at: number;
+};
+
+export type DuplicateGroup = {
+  hash: string;
+  books: Book[];
+};
+
 export type UploadedFile = {
   name: string;
   path: string;
@@ -85,4 +125,5 @@ export type UploadedFile = {
 export type UploadResult = {
   uploaded: UploadedFile[];
   scan: ScanResult;
+  job?: LibraryJob;
 };

@@ -11,20 +11,27 @@ import (
 )
 
 type bookDTO struct {
-	ID           int64  `json:"id"`
-	FolderID     int64  `json:"folder_id"`
-	Path         string `json:"path"`
-	SourcePath   string `json:"source_path,omitempty"`
-	Title        string `json:"title"`
-	Author       string `json:"author,omitempty"`
-	Format       string `json:"format"`
-	Encoding     string `json:"encoding,omitempty"`
-	SizeBytes    int64  `json:"size_bytes"`
-	CharCount    int64  `json:"char_count,omitempty"`
-	ChapterCount int64  `json:"chapter_count,omitempty"`
-	FileMtime    int64  `json:"file_mtime"`
-	AddedAt      int64  `json:"added_at"`
-	ScannedAt    int64  `json:"scanned_at"`
+	ID            int64    `json:"id"`
+	FolderID      int64    `json:"folder_id"`
+	Path          string   `json:"path"`
+	SourcePath    string   `json:"source_path,omitempty"`
+	Title         string   `json:"title"`
+	Author        string   `json:"author,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	Category      string   `json:"category,omitempty"`
+	Favorite      bool     `json:"favorite"`
+	ReadingStatus string   `json:"reading_status"`
+	CoverColor    string   `json:"cover_color"`
+	CoverLabel    string   `json:"cover_label"`
+	Tags          []string `json:"tags,omitempty"`
+	Format        string   `json:"format"`
+	Encoding      string   `json:"encoding,omitempty"`
+	SizeBytes     int64    `json:"size_bytes"`
+	CharCount     int64    `json:"char_count,omitempty"`
+	ChapterCount  int64    `json:"chapter_count,omitempty"`
+	FileMtime     int64    `json:"file_mtime"`
+	AddedAt       int64    `json:"added_at"`
+	ScannedAt     int64    `json:"scanned_at"`
 }
 
 type chapterDTO struct {
@@ -43,6 +50,20 @@ func toBookDTO(b store.Book) bookDTO {
 	if b.Author.Valid {
 		d.Author = b.Author.String
 	}
+	if b.Description.Valid {
+		d.Description = b.Description.String
+	}
+	if b.Category.Valid {
+		d.Category = b.Category.String
+	}
+	d.Favorite = b.Favorite
+	d.ReadingStatus = b.ReadingStatus
+	if b.CoverColor.Valid {
+		d.CoverColor = b.CoverColor.String
+	}
+	if b.CoverLabel.Valid {
+		d.CoverLabel = b.CoverLabel.String
+	}
 	if b.SourcePath.Valid {
 		d.SourcePath = b.SourcePath.String
 	}
@@ -54,6 +75,18 @@ func toBookDTO(b store.Book) bookDTO {
 	}
 	if b.ChapterCount.Valid {
 		d.ChapterCount = b.ChapterCount.Int64
+	}
+	return d
+}
+
+func (s *Server) toBookDTOWithTags(r *http.Request, b store.Book) bookDTO {
+	d := toBookDTO(b)
+	tags, err := s.store.TagsForBook(r.Context(), b.ID)
+	if err == nil && len(tags) > 0 {
+		d.Tags = make([]string, 0, len(tags))
+		for _, t := range tags {
+			d.Tags = append(d.Tags, t.Name)
+		}
 	}
 	return d
 }
@@ -72,7 +105,7 @@ func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]bookDTO, 0, len(books))
 	for _, b := range books {
-		out = append(out, toBookDTO(b))
+		out = append(out, s.toBookDTOWithTags(r, b))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"books": out})
 }
@@ -102,7 +135,7 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 		cdtos = append(cdtos, chapterDTO{Idx: c.Idx, Title: c.Title, Level: c.Level, CharOffset: c.CharOffset})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"book":     toBookDTO(book),
+		"book":     s.toBookDTOWithTags(r, book),
 		"chapters": cdtos,
 	})
 }

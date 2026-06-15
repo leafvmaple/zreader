@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/leafvmaple/zreader/internal/library"
 	"github.com/leafvmaple/zreader/internal/store"
 )
 
@@ -91,25 +90,30 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
-	scanner := &library.Scanner{Store: s.store, Logger: s.cfg.Logger}
-
 	folders, err := s.store.ListFolders(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list_folders", err)
 		return
 	}
 
-	var results []library.ScanResult
+	var total int64
 	for _, f := range folders {
 		if body.FolderID != 0 && f.ID != body.FolderID {
 			continue
 		}
-		res, err := scanner.ScanFolder(r.Context(), f)
-		if err != nil {
-			s.cfg.Logger.Printf("scan folder %d (%s) failed: %v", f.ID, f.Path, err)
-			// Keep going — we still want partial success info in the response.
-		}
-		results = append(results, res)
+		total++
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"scans": results})
+	payload := jobPayload{FolderID: body.FolderID}
+	job, err := s.createJob(r.Context(), "scan", "Scan library", payload, body.FolderID, 0, total)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create_job", err)
+		return
+	}
+	_ = s.store.StartJob(r.Context(), job.ID)
+	results, runErr := s.runScanPayload(r.Context(), payload)
+	if err := s.store.FinishJob(r.Context(), job.ID, scanResultJobResult(results, runErr)); err != nil {
+		s.cfg.Logger.Printf("finish job %d: %v", job.ID, err)
+	}
+	done, _ := s.store.GetJob(r.Context(), job.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"scans": results, "job": toJobDTO(done)})
 }

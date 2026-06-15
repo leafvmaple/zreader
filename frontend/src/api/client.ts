@@ -7,10 +7,14 @@ import type {
   Bookmark,
   Chapter,
   ContentSlice,
+  DuplicateGroup,
   Folder,
+  LibraryJob,
   Progress,
+  ReadingStatus,
   ScanResult,
   SearchMatch,
+  Tag,
   UploadResult,
 } from '../types/api';
 
@@ -72,6 +76,23 @@ export async function scan(folderId?: number): Promise<ScanResult[]> {
   return out.scans ?? [];
 }
 
+export async function listJobs(limit = 50): Promise<LibraryJob[]> {
+  const out = await request<{ jobs: LibraryJob[] }>(`/api/v1/library/jobs?limit=${limit}`);
+  return out.jobs ?? [];
+}
+
+export async function retryJob(id: number): Promise<LibraryJob> {
+  const out = await request<{ job: LibraryJob }>(`/api/v1/library/jobs/${id}/retry`, {
+    method: 'POST',
+  });
+  return out.job;
+}
+
+export async function listTags(): Promise<Tag[]> {
+  const out = await request<{ tags: Tag[] }>('/api/v1/library/tags');
+  return out.tags ?? [];
+}
+
 export async function uploadBooks(files: File[], folderId?: number): Promise<UploadResult> {
   const body = new FormData();
   if (folderId) {
@@ -96,6 +117,46 @@ export async function listBooks(folderId?: number): Promise<Book[]> {
 
 export async function getBook(id: number): Promise<{ book: Book; chapters: Chapter[] }> {
   return request<{ book: Book; chapters: Chapter[] }>(`/api/v1/books/${id}`);
+}
+
+export type BookPatch = Partial<Pick<
+  Book,
+  'title' | 'author' | 'description' | 'category' | 'favorite' | 'reading_status' | 'cover_color' | 'cover_label'
+>> & { tags?: string[] };
+
+export async function patchBook(id: number, patch: BookPatch): Promise<Book> {
+  const out = await request<{ book: Book }>(`/api/v1/books/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return out.book;
+}
+
+export async function setBookTags(id: number, tags: string[]): Promise<Tag[]> {
+  const out = await request<{ tags: Tag[] }>(`/api/v1/books/${id}/tags`, {
+    method: 'PUT',
+    body: JSON.stringify({ tags }),
+  });
+  return out.tags ?? [];
+}
+
+export async function duplicateBooks(): Promise<DuplicateGroup[]> {
+  const out = await request<{ groups: DuplicateGroup[] }>('/api/v1/books/duplicates');
+  return out.groups ?? [];
+}
+
+export type BatchBooksBody =
+  | { action: 'tag' | 'untag'; book_ids: number[]; tags: string[] }
+  | { action: 'status'; book_ids: number[]; reading_status: ReadingStatus }
+  | { action: 'favorite'; book_ids: number[]; favorite: boolean }
+  | { action: 'reparse' | 'delete'; book_ids: number[]; delete_source?: boolean };
+
+export async function batchBooks(body: BatchBooksBody): Promise<LibraryJob> {
+  const out = await request<{ job: LibraryJob }>('/api/v1/books/batch', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return out.job;
 }
 
 export async function getContent(

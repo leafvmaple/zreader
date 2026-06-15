@@ -11,6 +11,8 @@
 --     always the literal string "default".
 --   * `bookmarks` is a future-facing table (not used by MVP handlers yet)
 --     but cheap to create up-front so we don't have to write a migration.
+--   * v0.7 library-management fields on `books` are user-owned metadata.
+--     Re-scans update source/chapter data but keep these values stable.
 
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
@@ -33,6 +35,12 @@ CREATE TABLE IF NOT EXISTS books (
     source_path   TEXT,
     title         TEXT    NOT NULL,
     author        TEXT,
+    description   TEXT,
+    category      TEXT,
+    favorite      INTEGER NOT NULL DEFAULT 0,
+    reading_status TEXT  NOT NULL DEFAULT 'unread',
+    cover_color   TEXT,
+    cover_label   TEXT,
     format        TEXT    NOT NULL,         -- cached format, currently 'epub'
     encoding      TEXT,                     -- detected source encoding
     size_bytes    INTEGER NOT NULL,
@@ -46,6 +54,22 @@ CREATE TABLE IF NOT EXISTS books (
 
 CREATE INDEX IF NOT EXISTS idx_books_folder ON books(folder_id);
 CREATE INDEX IF NOT EXISTS idx_books_title  ON books(title);
+CREATE INDEX IF NOT EXISTS idx_books_hash   ON books(file_hash);
+
+CREATE TABLE IF NOT EXISTS tags (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    name     TEXT    NOT NULL UNIQUE,
+    color    TEXT,
+    added_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS book_tags (
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (book_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_book_tags_tag ON book_tags(tag_id);
 
 CREATE TABLE IF NOT EXISTS chapters (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,3 +105,25 @@ CREATE TABLE IF NOT EXISTS bookmarks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_bookmarks_user_book ON bookmarks(user_id, book_id);
+
+CREATE TABLE IF NOT EXISTS library_jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    type        TEXT    NOT NULL,
+    status      TEXT    NOT NULL,
+    label       TEXT,
+    payload     TEXT,
+    folder_id   INTEGER,
+    book_id     INTEGER,
+    total       INTEGER NOT NULL DEFAULT 0,
+    completed   INTEGER NOT NULL DEFAULT 0,
+    added       INTEGER NOT NULL DEFAULT 0,
+    updated     INTEGER NOT NULL DEFAULT 0,
+    removed     INTEGER NOT NULL DEFAULT 0,
+    failed      TEXT,
+    error       TEXT,
+    created_at  INTEGER NOT NULL,
+    started_at  INTEGER,
+    finished_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_library_jobs_created ON library_jobs(created_at DESC);

@@ -59,6 +59,32 @@ func Open(dataDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("add books.source_path: %w", err)
 	}
+	bookColumns := []struct {
+		name string
+		sql  string
+	}{
+		{"description", `ALTER TABLE books ADD COLUMN description TEXT`},
+		{"category", `ALTER TABLE books ADD COLUMN category TEXT`},
+		{"favorite", `ALTER TABLE books ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0`},
+		{"reading_status", `ALTER TABLE books ADD COLUMN reading_status TEXT NOT NULL DEFAULT 'unread'`},
+		{"cover_color", `ALTER TABLE books ADD COLUMN cover_color TEXT`},
+		{"cover_label", `ALTER TABLE books ADD COLUMN cover_label TEXT`},
+	}
+	for _, col := range bookColumns {
+		if _, err := db.Exec(col.sql); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			_ = db.Close()
+			return nil, fmt.Errorf("add books.%s: %w", col.name, err)
+		}
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_books_status ON books(reading_status)`,
+		`CREATE INDEX IF NOT EXISTS idx_books_fav ON books(favorite)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("create v0.7 book index: %w", err)
+		}
+	}
 	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version(version) VALUES (1)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("seed schema_version: %w", err)

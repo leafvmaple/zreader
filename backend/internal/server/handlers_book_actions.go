@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -262,13 +263,27 @@ func (s *Server) handleReparseBook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	payload := jobPayload{BookIDs: []int64{book.ID}, Action: "reparse"}
+	job, err := s.createJob(r.Context(), "batch", "Reparse book", payload, folder.ID, book.ID, 1)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create_job", err)
+		return
+	}
+	_ = s.store.StartJob(r.Context(), job.ID)
 	scanner := &library.Scanner{Store: s.store, Logger: s.cfg.Logger}
 	res, err := scanner.ReparseBook(r.Context(), folder, book)
 	if err != nil {
+		_ = s.store.FinishJob(r.Context(), job.ID, store.JobResult{Total: 1, Completed: 1, Error: err.Error()})
 		writeError(w, http.StatusConflict, "source_not_found", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"scan": res})
+	if err := s.store.FinishJob(r.Context(), job.ID, store.JobResult{
+		Total: 1, Completed: 1, Added: int64(res.Added), Updated: int64(res.Updated), Removed: int64(res.Removed),
+	}); err != nil {
+		s.cfg.Logger.Printf("finish job %d: %v", job.ID, err)
+	}
+	done, _ := s.store.GetJob(r.Context(), job.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"scan": res, "job": toJobDTO(done)})
 }
 
 func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
@@ -277,22 +292,11 @@ func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deleteSource := r.URL.Query().Get("source") != "false"
-	if deleteSource {
-		sourcePath, err := library.FindBookSource(folder.Path, book)
-		if err != nil {
+	if err := s.deleteBook(r.Context(), book, folder, deleteSource); err != nil {
+		if errors.Is(err, errSourceNotFound) {
 			writeError(w, http.StatusConflict, "source_not_found", err)
 			return
 		}
-		if err := os.Remove(sourcePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			writeError(w, http.StatusInternalServerError, "delete_source", err)
-			return
-		}
-	}
-	if err := os.Remove(book.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		writeError(w, http.StatusInternalServerError, "delete_cache", err)
-		return
-	}
-	if err := s.store.DeleteBook(r.Context(), book.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "not_found", err)
 			return
@@ -301,6 +305,27 @@ func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+var errSourceNotFound = errors.New("source_not_found")
+
+func (s *Server) deleteBook(ctx context.Context, book store.Book, folder store.Folder, deleteSource bool) error {
+	if deleteSource {
+		sourcePath, err := library.FindBookSource(folder.Path, book)
+		if err != nil {
+			return fmt.Errorf("%w: %v", errSourceNotFound, err)
+		}
+		if err := os.Remove(sourcePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("delete source: %w", err)
+		}
+	}
+	if err := os.Remove(book.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("delete cache: %w", err)
+	}
+	if err := s.store.DeleteBook(ctx, book.ID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) bookAndFolder(w http.ResponseWriter, r *http.Request) (store.Book, store.Folder, bool) {

@@ -109,11 +109,10 @@ can write to it.
 
 ## Roadmap
 
-The current release is v0.6: it imports TXT, EPUB, and text-layer PDF sources,
+The current release is v0.7: it imports TXT, EPUB, and text-layer PDF sources,
 caches them as EPUB, parses chapters, serves a web reader, syncs single-user
-reading progress, and covers the core daily-reading workflow. The next
-milestones focus on making larger libraries easier to manage and expanding
-format coverage.
+reading progress, and adds library-management workflows for larger shelves. The
+next milestones focus on expanding format coverage and deployment safety.
 
 ### v0.6 — Daily Reader (implemented)
 
@@ -128,16 +127,17 @@ Delivered: normal reading sessions now feel complete enough for daily use.
 - Clear upload/import failure messages in the UI.
 - Mobile reading interaction polish: tap zones and immersive chrome toggle.
 
-### v0.7 — Library Management
+### v0.7 — Library Management (implemented)
 
-Goal: manage tens or hundreds of books without falling back to the filesystem.
+Delivered: tens or hundreds of books can now be managed without falling back to
+the filesystem for common tasks.
 
-- Cover extraction and default cover generation.
+- Deterministic default covers for books without embedded cover assets.
 - Editable metadata: title, author, and description.
 - Tags, categories, favorites, and reading status.
 - Duplicate detection.
 - Batch operations for delete, re-scan, and tagging.
-- Import/scan job queue with history, progress, retry, and failure details.
+- Import/scan/batch job history with retry, result counts, and failure details.
 
 ### v0.8 — Format Coverage
 
