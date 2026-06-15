@@ -258,6 +258,16 @@ try {
   assert((await page.locator('.job-list li').count()) > 0, 'job history did not open');
   await page.locator('.library-panel__close').click();
 
+  // P2: a no-match search shows the friendly empty state, then clears.
+  await page.locator('.shelf__search').fill('zzz_no_such_book_zzz');
+  await page.waitForSelector('.shelf__empty');
+  assert(
+    /没有匹配/.test(await page.locator('.shelf__empty').innerText()),
+    'no-match empty state did not render',
+  );
+  await page.locator('.shelf__search').fill('');
+  await page.waitForSelector('.book-row');
+
   // Both uploads share identical content (they're the duplicate pair), so row
   // order between them isn't guaranteed. Rewrite both sources with the fresh
   // needle: whichever row sorts first, reparsing it then yields searchable
@@ -284,6 +294,16 @@ try {
   assert(
     (await topIcons.locator('svg').count()) === 2 && (await bottomIcons.locator('svg').count()) === 3,
     'reader chrome buttons should render svg icons, not text or emoji',
+  );
+
+  // P2: the first-entry hint shows once, dismisses, and is remembered. Dismiss
+  // it before driving the chrome, since it overlays the bars while up.
+  assert(await page.locator('.reader__hint').isVisible(), 'first-entry hint did not show');
+  await page.locator('.reader__hint-ok').click();
+  assert((await page.locator('.reader__hint').count()) === 0, 'first-entry hint did not dismiss');
+  assert(
+    (await page.evaluate(() => localStorage.getItem('zreader.reader.hinted'))) === '1',
+    'first-entry hint was not remembered',
   );
 
   await page.locator('.reader__top button.reader__icon-btn').nth(0).click();
@@ -320,6 +340,12 @@ try {
   await page.locator('.reader__bottom button.reader__icon-btn').nth(2).click();
   await page.locator('.settings__seg').nth(0).locator('button').nth(0).click();
   assert(await page.locator('.reader.reader--line-compact').count() === 1, 'line-height setting did not apply');
+  // P2: reset now sits at the bottom of the drawer and reverts the change.
+  await page.locator('.settings__reset').click();
+  assert(
+    (await page.locator('.reader.reader--line-compact').count()) === 0,
+    'reset did not revert the line-height setting',
+  );
   await page.keyboard.press('Escape');
 
   await page.setViewportSize({ width: 390, height: 720 });
