@@ -75,6 +75,10 @@ func (s *Server) handleSearchBook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "get_book", err)
 		return
 	}
+	if book.Format != "epub" {
+		writeError(w, http.StatusBadRequest, "unsupported_search", errors.New("book has no searchable text"))
+		return
+	}
 	chapters, err := s.store.LoadChapters(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "load_chapters", err)
@@ -310,17 +314,19 @@ func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 var errSourceNotFound = errors.New("source_not_found")
 
 func (s *Server) deleteBook(ctx context.Context, book store.Book, folder store.Folder, deleteSource bool) error {
+	sourcePath, sourceErr := library.FindBookSource(folder.Path, book)
 	if deleteSource {
-		sourcePath, err := library.FindBookSource(folder.Path, book)
-		if err != nil {
-			return fmt.Errorf("%w: %v", errSourceNotFound, err)
+		if sourceErr != nil {
+			return fmt.Errorf("%w: %v", errSourceNotFound, sourceErr)
 		}
 		if err := os.Remove(sourcePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("delete source: %w", err)
 		}
 	}
-	if err := os.Remove(book.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("delete cache: %w", err)
+	if sourceErr != nil || book.Path != sourcePath {
+		if err := os.Remove(book.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("delete cache: %w", err)
+		}
 	}
 	if err := s.store.DeleteBook(ctx, book.ID); err != nil {
 		return err

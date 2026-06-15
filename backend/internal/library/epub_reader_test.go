@@ -1,6 +1,7 @@
 package library
 
 import (
+	"archive/zip"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -104,7 +105,7 @@ func TestReadEpub_RoundTripWithVolumes(t *testing.T) {
 		level int
 	}{
 		{"第一卷　序卷", 0}, // outermost <li> in nav → depth 0
-		{"第一章　起", 1},   // nested under the volume → depth 1
+		{"第一章　起", 1},  // nested under the volume → depth 1
 		{"第二章　承", 1},
 	}
 	for i, w := range want {
@@ -113,6 +114,76 @@ func TestReadEpub_RoundTripWithVolumes(t *testing.T) {
 				i, book.Chapters[i].Title, book.Chapters[i].Level, w.title, w.level)
 		}
 	}
+}
+
+func TestReadEpub_PreservesReadableRichBlocks(t *testing.T) {
+	p := writeRichEpubToTemp(t)
+	book, err := ReadEpub(p)
+	if err != nil {
+		t.Fatalf("ReadEpub: %v", err)
+	}
+	for _, want := range []string{
+		"Lead [Image: Map]",
+		"List item text",
+		"Footnote text",
+		"Line break text",
+	} {
+		if !strings.Contains(book.FlatText, want) {
+			t.Fatalf("FlatText missing %q:\n%s", want, book.FlatText)
+		}
+	}
+}
+
+func writeRichEpubToTemp(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "rich.epub")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	if err := zipFile(zw, "META-INF/container.xml", containerXML()); err != nil {
+		t.Fatalf("container: %v", err)
+	}
+	if err := zipFile(zw, opfPath, `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>RichBook</dc:title>
+    <dc:creator>AuthorX</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="chap1" href="xhtml/chap-0001.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="chap1"/></spine>
+</package>
+`); err != nil {
+		t.Fatalf("opf: %v", err)
+	}
+	if err := zipFile(zw, navPath, `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body>
+<nav><ol><li><a href="xhtml/chap-0001.xhtml">Chapter 1</a></li></ol></nav>
+</body></html>
+`); err != nil {
+		t.Fatalf("nav: %v", err)
+	}
+	if err := zipFile(zw, "EPUB/xhtml/chap-0001.xhtml", `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body>
+<h1>Chapter 1</h1>
+<p>Lead <img src="../images/map.png" alt="Map"/></p>
+<ul><li>List item text</li></ul>
+<aside epub:type="footnote">Footnote text</aside>
+<p>Line<br/>break text</p>
+</body></html>
+`); err != nil {
+		t.Fatalf("chapter: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return p
 }
 
 func TestReadEpub_OffsetsAreConsistent(t *testing.T) {

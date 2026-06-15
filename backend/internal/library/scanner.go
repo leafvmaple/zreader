@@ -244,28 +244,50 @@ func (s *Scanner) ReparseBook(ctx context.Context, folder store.Folder, b store.
 	return s.ScanSourceFiles(ctx, folder, []string{sourcePath})
 }
 
-// ingestFile reads a cached EPUB, derives chapters + char count from
-// its nav + spine, and persists the book row + chapter rows. The
-// source-side metadata (encoding/source marker, mtime, byte size, content hash)
-// comes straight from CacheResult — Phase 1 already saw the source and
-// there's no reason to re-stat it.
-//
-// Book row's Path is the cached EPUB path. Format is "epub" — TXT/PDF/EPUB
-// are only input formats from this layer up.
+// ingestFile persists the canonical representation produced by Phase 1.
+// Most sources become EPUB; image-only PDFs keep their source path and use
+// a dedicated page-based reader mode.
 func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult) (store.Book, bool, error) {
 	name := filepath.Base(cr.Path)
-
-	epubBook, err := ReadEpub(cr.Path)
-	if err != nil {
-		return store.Book{}, false, fmt.Errorf("read epub: %w", err)
-	}
 
 	authorLog := cr.Author
 	if authorLog == "" {
 		authorLog = "?"
 	}
-	s.infof("ingest %s: enc=%s chars=%d chapters=%d title=%q author=%s",
-		name, cr.SourceEnc, utf8.RuneCountInString(epubBook.FlatText), len(epubBook.Chapters), cr.Title, authorLog)
+
+	cacheFormat := cr.CacheFormat
+	if cacheFormat == "" {
+		cacheFormat = "epub"
+	}
+	var flatText string
+	var parsedChapters []Chapter
+	switch cacheFormat {
+	case "epub":
+		epubBook, err := ReadEpub(cr.Path)
+		if err != nil {
+			return store.Book{}, false, fmt.Errorf("read epub: %w", err)
+		}
+		flatText = epubBook.FlatText
+		parsedChapters = epubBook.Chapters
+	case "pdf-image":
+		pages := cr.SourcePages
+		if pages <= 0 {
+			meta, err := InspectPDF(cr.Path)
+			if err != nil {
+				return store.Book{}, false, fmt.Errorf("inspect pdf: %w", err)
+			}
+			pages = meta.Pages
+		}
+		parsedChapters = pdfImageChapters(pages)
+	default:
+		return store.Book{}, false, fmt.Errorf("unsupported cache format %q", cacheFormat)
+	}
+	charCount := int64(utf8.RuneCountInString(flatText))
+	if cacheFormat == "pdf-image" {
+		charCount = int64(len(parsedChapters))
+	}
+	s.infof("ingest %s: format=%s enc=%s chars=%d chapters=%d title=%q author=%s",
+		name, cacheFormat, cr.SourceEnc, charCount, len(parsedChapters), cr.Title, authorLog)
 
 	book := store.Book{
 		FolderID:     folderID,
@@ -273,11 +295,11 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult
 		SourcePath:   sql.NullString{String: cr.SourcePath, Valid: cr.SourcePath != ""},
 		Title:        cr.Title,
 		Author:       sql.NullString{String: cr.Author, Valid: cr.Author != "" && cr.Author != DefaultAuthor},
-		Format:       "epub",
+		Format:       cacheFormat,
 		Encoding:     sql.NullString{String: cr.SourceEnc, Valid: cr.SourceEnc != ""},
 		SizeBytes:    cr.SourceSize,
-		CharCount:    sql.NullInt64{Int64: int64(utf8.RuneCountInString(epubBook.FlatText)), Valid: true},
-		ChapterCount: sql.NullInt64{Int64: int64(len(epubBook.Chapters)), Valid: true},
+		CharCount:    sql.NullInt64{Int64: charCount, Valid: true},
+		ChapterCount: sql.NullInt64{Int64: int64(len(parsedChapters)), Valid: true},
 		FileMtime:    cr.SourceMtime,
 		FileHash:     sql.NullString{String: cr.SourceHash, Valid: cr.SourceHash != ""},
 	}
@@ -288,8 +310,8 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult
 	}
 	book.ID = id
 
-	storeChapters := make([]store.Chapter, 0, len(epubBook.Chapters))
-	for _, c := range epubBook.Chapters {
+	storeChapters := make([]store.Chapter, 0, len(parsedChapters))
+	for _, c := range parsedChapters {
 		storeChapters = append(storeChapters, store.Chapter{
 			Idx:        int64(c.Idx),
 			Title:      c.Title,
@@ -303,6 +325,24 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult
 	}
 
 	return book, isNew, nil
+}
+
+func pdfImageChapters(pages int) []Chapter {
+	if pages <= 0 {
+		pages = 1
+	}
+	chapters := make([]Chapter, 0, pages)
+	for i := 1; i <= pages; i++ {
+		offset := i - 1
+		chapters = append(chapters, Chapter{
+			Idx:        i,
+			Title:      fmt.Sprintf("Page %d", i),
+			Level:      0,
+			ByteOffset: offset,
+			CharOffset: offset,
+		})
+	}
+	return chapters
 }
 
 // relPath is best-effort folder-relative path for logging; falls back

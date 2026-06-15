@@ -333,7 +333,7 @@ func readChapterXHTML(z *zip.Reader, xhtmlPath string) (title string, paras []st
 	dec.Entity = xml.HTMLEntity
 
 	var buf strings.Builder
-	capture := "" // "h1" or "p" while accumulating an outermost block
+	capture := "" // heading or text block while accumulating an outermost block
 
 	for {
 		tok, e := dec.Token()
@@ -345,11 +345,29 @@ func readChapterXHTML(z *zip.Reader, xhtmlPath string) (title string, paras []st
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			if capture == "" {
-				name := strings.ToLower(t.Name.Local)
-				if isHTMLHeading(name) || name == "p" {
+			name := strings.ToLower(t.Name.Local)
+			if capture != "" {
+				switch name {
+				case "br":
+					buf.WriteByte('\n')
+				case "img":
+					if alt := imageAltText(t); alt != "" {
+						if buf.Len() > 0 {
+							buf.WriteByte(' ')
+						}
+						buf.WriteString("[Image: ")
+						buf.WriteString(alt)
+						buf.WriteString("]")
+					}
+				}
+			} else {
+				if isHTMLHeading(name) || isHTMLTextBlock(name) {
 					capture = name
 					buf.Reset()
+				} else if name == "img" {
+					if alt := imageAltText(t); alt != "" {
+						paras = append(paras, "[Image: "+alt+"]")
+					}
 				}
 			}
 		case xml.EndElement:
@@ -358,7 +376,7 @@ func readChapterXHTML(z *zip.Reader, xhtmlPath string) (title string, paras []st
 				if txt != "" {
 					if isHTMLHeading(capture) && title == "" {
 						title = txt
-					} else if capture == "p" {
+					} else if isHTMLTextBlock(capture) {
 						paras = append(paras, txt)
 					}
 				}
@@ -380,6 +398,24 @@ func isHTMLHeading(name string) bool {
 	default:
 		return false
 	}
+}
+
+func isHTMLTextBlock(name string) bool {
+	switch name {
+	case "p", "li", "blockquote", "aside":
+		return true
+	default:
+		return false
+	}
+}
+
+func imageAltText(el xml.StartElement) string {
+	for _, a := range el.Attr {
+		if strings.ToLower(a.Name.Local) == "alt" {
+			return strings.TrimSpace(collapseSpaces(a.Value))
+		}
+	}
+	return ""
 }
 
 // --- Flat-text cache -----------------------------------------------------

@@ -35,6 +35,37 @@ type PDFText struct {
 	Pages  int
 }
 
+// InspectPDF reads metadata and page count without requiring a text layer.
+func InspectPDF(pdfPath string) (out PDFText, err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			err = fmt.Errorf("read pdf: %v", v)
+		}
+	}()
+
+	f, err := os.Open(pdfPath)
+	if err != nil {
+		return out, fmt.Errorf("open pdf: %w", err)
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return out, fmt.Errorf("stat pdf: %w", err)
+	}
+	r, err := pdf.NewReader(f, st.Size())
+	if err != nil {
+		return out, fmt.Errorf("open pdf reader: %w", err)
+	}
+	info := r.Trailer().Key("Info")
+	out.Title = strings.TrimSpace(info.Key("Title").Text())
+	out.Author = strings.TrimSpace(info.Key("Author").Text())
+	out.Pages = r.NumPage()
+	if out.Pages == 0 {
+		return out, fmt.Errorf("pdf has no pages")
+	}
+	return out, nil
+}
+
 // ExtractPDFText extracts the selectable text layer from a PDF and returns a
 // paragraph-ish plain text view. Each visual line becomes a paragraph so the
 // downstream EPUB builder does not drop body text when the PDF lacks blank
@@ -80,6 +111,7 @@ func ExtractPDFText(pdfPath string) (out PDFText, err error) {
 			pages = append(pages, text)
 		}
 	}
+	pages = stripRepeatedPDFEdgeLines(pages)
 	out.Text = ensureTrailingLF(strings.TrimSpace(strings.Join(pages, "\n\n")))
 	if countNonSpaceRunes(out.Text) < minPDFExtractedRunes {
 		return out, fmt.Errorf("%w: scanned/image PDFs need OCR before import", ErrPDFNoText)
@@ -898,6 +930,55 @@ func pdfPageText(items []pdf.Text) string {
 	}
 	flush()
 	return strings.Join(lines, "\n\n")
+}
+
+func stripRepeatedPDFEdgeLines(pages []string) []string {
+	if len(pages) < 2 {
+		return pages
+	}
+	firstCounts := map[string]int{}
+	lastCounts := map[string]int{}
+	splitPages := make([][]string, len(pages))
+	for i, page := range pages {
+		lines := splitPDFPageLines(page)
+		splitPages[i] = lines
+		if len(lines) == 0 {
+			continue
+		}
+		firstCounts[normalisePDFEdgeLine(lines[0])]++
+		lastCounts[normalisePDFEdgeLine(lines[len(lines)-1])]++
+	}
+	repeated := func(count int) bool { return count*2 > len(pages) }
+	out := make([]string, 0, len(pages))
+	for _, lines := range splitPages {
+		if len(lines) == 0 {
+			out = append(out, "")
+			continue
+		}
+		if repeated(firstCounts[normalisePDFEdgeLine(lines[0])]) {
+			lines = lines[1:]
+		}
+		if len(lines) > 0 && repeated(lastCounts[normalisePDFEdgeLine(lines[len(lines)-1])]) {
+			lines = lines[:len(lines)-1]
+		}
+		out = append(out, strings.Join(lines, "\n\n"))
+	}
+	return out
+}
+
+func splitPDFPageLines(page string) []string {
+	var out []string
+	for _, line := range strings.Split(page, "\n\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func normalisePDFEdgeLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func pdfLineText(items []pdf.Text) string {

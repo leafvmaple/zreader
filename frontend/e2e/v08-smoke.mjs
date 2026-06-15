@@ -92,11 +92,41 @@ function longBookText(needle) {
   return `Chapter 1\n\n${paragraphs.join('\n\n')}\n\nChapter 2\n\nTail paragraph.`;
 }
 
+function escapePDFString(s) {
+  return s.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
+}
+
+function simplePDFBytes(title, author) {
+  const content = 'BT /F1 12 Tf\nET\n';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    `<< /Title (${escapePDFString(title)}) /Author (${escapePDFString(author)}) >>`,
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets = [];
+  for (let i = 0; i < objects.length; i += 1) {
+    offsets.push(Buffer.byteLength(body));
+    body += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(body);
+  body += `xref\n0 ${objects.length + 1}\n`;
+  body += '0000000000 65535 f \n';
+  for (const off of offsets) {
+    body += `${String(off).padStart(10, '0')} 00000 n \n`;
+  }
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(body, 'utf8');
+}
+
 if (!existsSync(distIndex)) {
   throw new Error('frontend dist is missing; run pnpm build before this e2e test');
 }
 
-const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'zreader-v07-e2e-'));
+const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'zreader-v08-e2e-'));
 const dataDir = path.join(tempRoot, 'data');
 const libraryDir = path.join(tempRoot, 'books');
 await mkdir(dataDir, { recursive: true });
@@ -242,7 +272,25 @@ try {
   ]);
   await page.waitForFunction(() => document.querySelectorAll('.book-row').length === 1);
 
-  console.log('v0.7 e2e smoke passed');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const imagePDFPath = path.join(tempRoot, 'ImageOnly - AuthorX.pdf');
+  await writeFile(imagePDFPath, simplePDFBytes('ImageOnly', 'AuthorX'));
+  await page.locator('.shelf__toolbar button').nth(2).click();
+  await page.locator('.upload-dialog input[type=file]').setInputFiles(imagePDFPath);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/v1/library/upload') && r.status() === 201),
+    page.locator('.upload-dialog__actions .shelf__btn--primary').click(),
+  ]);
+  await page.waitForFunction(() => document.querySelectorAll('.book-row').length === 2);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.url().includes('/source') && r.status() === 200),
+    page.locator('.book-row').first().locator('a.book-row__link').click(),
+  ]);
+  await page.waitForSelector('.reader__pdf-frame');
+  assert((await page.locator('.reader.reader--pdf').count()) === 1, 'pdf-image reader did not open');
+  assert(await page.getByText(/1\s*\/\s*1/).isVisible(), 'pdf page counter missing');
+
+  console.log('v0.8 e2e smoke passed');
 } finally {
   if (browser) await browser.close();
   await stopServer(server);

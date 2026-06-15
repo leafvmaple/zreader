@@ -1,12 +1,12 @@
 # zreader
 
-A self-hosted ebook reader. Point it at a directory of `.txt`, `.epub`, or
-text-layer `.pdf` files; it scans, detects/normalises text, parses chapters,
-and gives you a web reader with
-cross-device progress sync. Single binary, single ~23 MB container.
+A self-hosted ebook reader. Point it at a directory of `.txt`, `.epub`, `.pdf`,
+`.mobi`, or `.azw3` files; it scans, detects/normalises text where available,
+parses chapters, and gives you a web reader with cross-device progress sync.
+Single binary, single ~23 MB container.
 
-> Status: **MVP**. TXT, EPUB, and text-layer PDF are supported. Image-only
-> PDFs need OCR or a page-image reader mode and are not imported yet.
+> Status: **MVP**. TXT, EPUB, text-layer PDF, image-only PDF page viewing, and
+> converter-backed MOBI/AZW/AZW3 import are supported.
 
 ## Quick start
 
@@ -49,6 +49,7 @@ All optional. The defaults match the volume layout above.
 | `ZREADER_PORT`         | `8080`      | HTTP listen port.                                                     |
 | `ZREADER_DATA_DIR`     | `/data`     | SQLite database (`library.db`) lives here. Persist this.              |
 | `ZREADER_LIBRARY_PATH` | `/library`  | One or more book roots, OS-listsep separated (`:` on Linux).          |
+| `ZREADER_EBOOK_CONVERT`| unset       | Optional path to Calibre `ebook-convert` for MOBI/AZW/AZW3 import.    |
 
 Multiple library roots:
 
@@ -87,6 +88,15 @@ can write to it.
 - EPUB import via the same cached-EPUB reader used internally.
 - Text-layer PDF import: extracted text is normalised through the TXT chapter
   parser, then cached as EPUB.
+- Image-only/scanned PDF import: stored as a source-backed page reader mode,
+  without OCR.
+- MOBI/AZW/AZW3 import when Calibre `ebook-convert` is installed or configured
+  with `ZREADER_EBOOK_CONVERT`.
+- Manual chapter override sidecars: put `<book>.chapters.json` next to a source
+  file to replace automatic chapter parsing.
+- EPUB text fidelity: nested navigation, readable list/blockquote/footnote
+  blocks, and image alt text are preserved in the flat reader text.
+- PDF text cleanup removes repeated page headers/footers before chapter parsing.
 - Chapter parsing: Chinese `第X章/节/回/卷`, English `Chapter N`, bracketed
   CJK numerals (`「一」`, `【3】`, `〈12〉`). Falls back to a single "正文"
   chapter when no markers are found.
@@ -103,16 +113,35 @@ can write to it.
   Tailscale, etc.). Inside your homelab on a trusted network it's fine.
 - Single user. The schema has a `user_id` column but everyone is `default`
   in this mode.
-- Image-only/scanned PDFs are detected but not imported; they need local OCR
-  or a dedicated page-image reading mode.
-- MOBI not supported yet.
+- Image-only/scanned PDFs are readable as pages, but not OCR-searchable yet.
+- MOBI/AZW/AZW3 import requires an external converter; there is no native parser.
+
+### Manual chapter sidecars
+
+Create a JSON file next to the source, using the source stem plus
+`.chapters.json`:
+
+```json
+{
+  "chapters": [
+    { "title": "Manual A", "match": "Alpha opening", "level": 0 },
+    { "title": "Manual B", "match": "Beta opening", "level": 0 }
+  ]
+}
+```
+
+Use `match` to find the chapter start in the normalised text, or use
+`char_offset` for an exact rune offset. Sidecar chapters replace automatic
+chapter detection for that source.
 
 ## Roadmap
 
-The current release is v0.7: it imports TXT, EPUB, and text-layer PDF sources,
-caches them as EPUB, parses chapters, serves a web reader, syncs single-user
-reading progress, and adds library-management workflows for larger shelves. The
-next milestones focus on expanding format coverage and deployment safety.
+The current release is v0.8: it imports TXT, EPUB, text-layer PDF, image-only
+PDF, and converter-backed MOBI/AZW/AZW3 sources; caches text formats as EPUB;
+parses or overrides chapters; serves text and PDF-page reader modes; syncs
+single-user reading progress; and includes library-management workflows for
+larger shelves. The next milestones focus on users, safety, and deployment
+predictability.
 
 ### v0.6 — Daily Reader (implemented)
 
@@ -139,17 +168,19 @@ the filesystem for common tasks.
 - Batch operations for delete, re-scan, and tagging.
 - Import/scan/batch job history with retry, result counts, and failure details.
 
-### v0.8 — Format Coverage
+### v0.8 — Format Coverage (implemented)
 
-Goal: improve import success rate and fidelity.
+Delivered: import success rate and fidelity improved without adding heavyweight
+runtime dependencies to the container.
 
-- Image-only PDF support, starting with a page-image reader mode; OCR can be
-  added after the reading/progress model is in place.
-- Better EPUB fidelity for covers, images, footnotes, and nested navigation.
-- MOBI/AZW3 import.
+- Image-only PDF support via a source-backed PDF page reader mode; OCR can be
+  added later.
+- Better EPUB fidelity for image alt text, list/blockquote/footnote blocks, and
+  nested navigation.
+- MOBI/AZW/AZW3 import through optional Calibre `ebook-convert`.
 - Manual chapter override sidecars for books whose automatic parsing is wrong.
-- Continued PDF text cleanup: reading order, page header/footer filtering, and
-  footnote handling.
+- Continued PDF text cleanup: reading order and repeated page header/footer
+  filtering.
 
 ### v0.9 — Users and Safety
 

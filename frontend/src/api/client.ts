@@ -167,6 +167,10 @@ export async function getContent(
   return request<ContentSlice>(`/api/v1/books/${id}/content?from=${from}&len=${len}`);
 }
 
+export function bookSourceURL(id: number): string {
+  return `/api/v1/books/${id}/source`;
+}
+
 export async function searchBook(
   id: number,
   query: string,

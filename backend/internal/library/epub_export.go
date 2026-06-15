@@ -166,11 +166,11 @@ func chapterBodyXHTML(title, slice string) string {
 	b.WriteString(html.EscapeString(title))
 	b.WriteString("</h1>\n")
 
-	body := ""
-	if idx := strings.Index(slice, "\n\n"); idx >= 0 {
-		body = slice[idx+2:]
+	paras := strings.Split(slice, "\n\n")
+	if len(paras) > 0 && strings.TrimSpace(paras[0]) == title {
+		paras = paras[1:]
 	}
-	for _, para := range strings.Split(body, "\n\n") {
+	for _, para := range paras {
 		para = strings.TrimSpace(para)
 		if para == "" {
 			continue

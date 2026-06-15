@@ -9,9 +9,10 @@ productive in 30 seconds.
 
 ## What this is
 
-**zreader** is a self-hosted Chinese e-book (TXT) reader. Go backend +
+**zreader** is a self-hosted Chinese e-book reader. Go backend +
 embedded React SPA, single binary / single container, sqlite-backed.
-Single-user by default; the user is whoever the request comes from.
+TXT, EPUB, PDF, MOBI, and AZW-family sources are supported at the import
+boundary. Single-user by default; the user is whoever the request comes from.
 
 ## Privacy — corpus content stays out of the repo
 
@@ -62,7 +63,7 @@ backend/
   cmd/decodetest/      one-off encoding-detection CLI for debugging
   internal/
     config/            paths + env wiring
-    library/           file scanning, encoding detection, TXT formatting,
+    library/           file scanning, encoding detection, TXT/PDF/EPUB import,
                        chapter parsing, author metadata
     server/            HTTP router + handlers (net/http stdlib mux)
     store/             sqlite layer (modernc.org/sqlite — CGO-free)
@@ -82,30 +83,29 @@ it before touching anything in `internal/library/`.
 ScanFolder(folder)
   ├─ Phase 0 — RestoreBackups       ← migrate legacy *.txt.bak (one-time
   │                                    leftover from old in-place format)
-  ├─ Phase 1 — for each top-level *.txt source:
-  │     FormatToCache(folder, source)
-  │       ├─ DetectAndDecode(raw)
-  │       ├─ DetectMetadata(text)
-  │       ├─ ResolveMetadata(...)   ← by:line ▸ filename ▸ defaults
-  │       ├─ FormatText(text)
-  │       │    ├─ buildLogicalLines (rejoin wrap breaks)
-  │       │    ├─ splitAtChapters   (promote 第X章 to own paragraph)
-  │       │    └─ splitTitleFromBody (peel title off glued body)
-  │       └─ write → <folder>/<author>/<title>.txt (atomic)
-  ├─ Phase 2 — for each cached path:
-  │     ingestFile(cachedPath, title, author)
-  │       ├─ DetectAndDecode(cached)
-  │       ├─ ParseChapters(text, nil)  ← only sees normalised input
+  ├─ Phase 1 — for each top-level supported source:
+  │     FormatSourceToCache(folder, source)
+  │       ├─ TXT/PDF text: detect/extract text, FormatText, ParseChapters
+  │       ├─ EPUB: ReadEpub, preserve nested nav + readable block text
+  │       ├─ MOBI/AZW/AZW3: optional ebook-convert → EPUB → ReadEpub
+  │       ├─ optional <source-stem>.chapters.json override
+  │       └─ write → <folder>/<author>/<title>.epub (atomic)
+  │          or keep image-only PDF as source-backed pdf-image
+  ├─ Phase 2 — for each cache result:
+  │     ingestFile(cacheResult)
+  │       ├─ EPUB: ReadEpub cached text + chapters
+  │       ├─ pdf-image: build one synthetic chapter per PDF page
   │       └─ store.UpsertBook + store.ReplaceChapters
   └─ Phase 3 — store.DeleteBooksMissing(cached paths)
 ```
 
-**Source files are never modified.** The user's TXT at the scan
-folder's top level is read-only conceptually; the formatted output
-lives separately under `<folder>/<author>/<title>.txt`. Re-running
-`FormatToCache` overwrites the cached file on every scan, so a bug
-fix in `FormatText` takes effect on the next scan with no manual
-intervention.
+**Source files are never modified.** Top-level source files are read-only
+conceptually; formatted text formats live separately under
+`<folder>/<author>/<title>.epub`. Re-running `FormatSourceToCache`
+overwrites the cached EPUB on every scan, so a bug fix in `FormatText`,
+`ReadEpub`, or sidecar handling takes effect on the next scan with no
+manual intervention. Image-only PDFs are the exception: `book.Path` points
+at the source PDF and the frontend uses a source-backed PDF reader mode.
 
 **The contract `FormatText` enforces for downstream chapter detection:**
 
@@ -130,18 +130,19 @@ whole separation.
 ```text
 books/                              ← scan folder (the docker mount)
   <title-A> - <author-X>.txt        ← source (top-level, untouched)
-  <title-B> - <author-X>.txt        ← source (top-level, untouched)
+  <title-B> - <author-X>.epub       ← source (top-level, untouched)
+  <title-C> - <author-X>.pdf        ← source (top-level, untouched)
+  <title-A> - <author-X>.chapters.json ← optional manual chapter sidecar
   <author-X>/
-    <title-A>.txt                   ← formatted cache (overwritten each scan)
-    <title-B>.txt                   ← formatted cache (overwritten each scan)
+    <title-A>.epub                  ← formatted cache (overwritten each scan)
+    <title-B>.epub                  ← formatted cache (overwritten each scan)
 ```
 
-Only **top-level** `*.txt` files are treated as sources. Anything in a
-subdirectory is left alone by the format pass (Phase 1 ignores it) and
-ingested as-is if discovered (Phase 2's loop only sees what Phase 1
-produced, so manual content under subdirs becomes an "orphan" — not
-auto-tracked). Don't put sources in subfolders; rename or move them to
-the top level.
+Only **top-level** supported source files (`.txt`, `.epub`, `.pdf`,
+`.mobi`, `.azw`, `.azw3`) are treated as sources. Anything in a
+subdirectory is left alone by the format pass (Phase 1 ignores it), so
+manual content under subdirs is not auto-tracked. Don't put sources in
+subfolders; rename or move them to the top level.
 
 ### Migration from the legacy in-place flow
 
@@ -149,7 +150,7 @@ Older builds rewrote the source TXT in place and saved the original as
 `<path>.bak`. Phase 0 (`RestoreBackups`) detects these and reverses the
 mutation: `<path>.bak` becomes `<path>` again, `.bak` is removed. From
 then on the source is pristine and the cached file under
-`<author>/<title>.txt` becomes the only file the reader serves.
+`<author>/<title>.epub` becomes the text reader source.
 
 ## Chapter detection — tiered
 
@@ -367,12 +368,14 @@ URL).
 ## Things easy to get wrong
 
 - **Scanner re-runs the full format → ingest pipeline unconditionally**
-  every scan. Cached files under `<author>/<title>.txt` are overwritten,
-  and `ReplaceChapters` wipes + re-inserts. So if you change
-  `FormatText` or `ParseChapters` and want the DB to reflect it, just
-  trigger a re-scan — no migration needed.
-- **`book.Path` is the source of truth for file location**; database
-  IDs are stable across scans because path is `UNIQUE`. Don't rely on
+  every scan. Cached EPUBs under `<author>/<title>.epub` are overwritten,
+  and `ReplaceChapters` wipes + re-inserts. Image-only PDFs are source-backed
+  and have one synthetic chapter per page. So if you change `FormatText`,
+  `ReadEpub`, PDF cleanup, sidecar handling, or chapter parsing and want the
+  DB to reflect it, just trigger a re-scan — no migration needed.
+- **`book.Path` is the source of truth for the reader asset**; for text formats
+  it is the cached EPUB, while `pdf-image` books point at the source PDF.
+  Database IDs are stable across scans because path is `UNIQUE`. Don't rely on
   IDs being densely numbered or insertion-ordered.
 - **`CharOffset` is rune-indexed, `ByteOffset` is byte-indexed** into
   the decoded UTF-8 string. The reader endpoint slices by rune.

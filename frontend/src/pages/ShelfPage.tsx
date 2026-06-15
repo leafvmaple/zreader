@@ -587,7 +587,7 @@ export function ShelfPage() {
         ) : filtered.length === 0 ? (
           <p className="shelf__empty">
             {books.length === 0
-              ? '书库为空。点击右上「扫描书库」抓取已授权目录里的 .txt / .epub / .pdf 文件。'
+              ? '书库为空。点击右上「扫描书库」抓取已授权目录里的 .txt / .epub / .pdf / .mobi / .azw3 文件。'
               : '没有匹配的结果。'}
           </p>
         ) : (
@@ -733,7 +733,7 @@ export function ShelfPage() {
               <input
                 type="file"
                 multiple
-                accept=".txt,.epub,.pdf,text/plain,application/epub+zip,application/pdf"
+                accept=".txt,.epub,.pdf,.mobi,.azw,.azw3,text/plain,application/epub+zip,application/pdf"
                 disabled={uploadBusy}
                 onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
               />

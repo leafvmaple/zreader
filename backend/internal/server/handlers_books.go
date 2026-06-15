@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/leafvmaple/zreader/internal/library"
@@ -140,6 +142,36 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleBookSource(w http.ResponseWriter, r *http.Request) {
+	book, folder, ok := s.bookAndFolder(w, r)
+	if !ok {
+		return
+	}
+	if book.Format != "pdf-image" {
+		writeError(w, http.StatusBadRequest, "unsupported_source_view", errors.New("book does not use a source-backed reader mode"))
+		return
+	}
+	sourcePath, err := library.FindBookSource(folder.Path, book)
+	if err != nil {
+		writeError(w, http.StatusConflict, "source_not_found", err)
+		return
+	}
+	f, err := os.Open(sourcePath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "open_source", err)
+		return
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "stat_source", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, filepath.Base(sourcePath), st.ModTime(), f)
+}
+
 // handleBookContent serves a slice of the book's plain-text view.
 // Query:
 //
@@ -178,6 +210,10 @@ func (s *Server) handleBookContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "get_book", err)
+		return
+	}
+	if book.Format != "epub" {
+		writeError(w, http.StatusBadRequest, "unsupported_text_content", errors.New("book has no text content endpoint"))
 		return
 	}
 

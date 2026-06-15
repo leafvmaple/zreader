@@ -364,6 +364,18 @@ export function ReaderPage() {
         }
 
         const total = book.char_count ?? 0;
+        if (book.format === 'pdf-image') {
+          const pageCount = Math.max(1, chapters.length || total || 1);
+          const savedPage = progress?.chapter_idx || (progress ? progress.char_offset + 1 : 1);
+          const page = Math.max(1, Math.min(pageCount, savedPage));
+          setCurrentChapter(page);
+          setCurrentOffset(page - 1);
+          setPct(Math.round((page / pageCount) * 100));
+          setLoading(false);
+          initialised.current = true;
+          return;
+        }
+
         const targetIdx = progress
           ? chapterIdxAtOffset(progress.char_offset, chapters)
           : chapters[0].idx;
@@ -833,10 +845,148 @@ export function ReaderPage() {
     setSettings(DEFAULT_SETTINGS);
   }, []);
 
+  const pdfPageCount =
+    book?.format === 'pdf-image' ? Math.max(1, chapters.length || book.char_count || 1) : 0;
+  const goPDFPage = useCallback(
+    (page: number) => {
+      if (!book || book.format !== 'pdf-image') return;
+      const count = Math.max(1, chapters.length || book.char_count || 1);
+      const next = Math.max(1, Math.min(count, page));
+      setCurrentChapter(next);
+      setCurrentOffset(next - 1);
+      setPct(Math.round((next / count) * 100));
+      report({
+        char_offset: next - 1,
+        chapter_idx: next,
+        chapter_offset: 0,
+      });
+    },
+    [book, chapters.length, report],
+  );
+
   // --- Render -------------------------------------------------------------
 
   const themeClass = `reader reader--theme-${settings.theme} reader--size-${settings.size} reader--font-${settings.font} reader--line-${settings.line} reader--gap-${settings.gap} reader--width-${settings.width} reader--margin-${settings.margin} reader--indent-${settings.indent}`;
   const currentChapterTitle = chapters.find((c) => c.idx === currentChapter)?.title ?? '';
+
+  if (book?.format === 'pdf-image') {
+    const pdfSrc = `${api.bookSourceURL(bookId)}#page=${currentChapter}`;
+    return (
+      <div className={`${themeClass} reader--pdf`}>
+        {showChrome && (
+          <header className="reader__top">
+            <Link
+              to="/"
+              className="reader__icon-btn"
+              onClick={() => void flush()}
+              aria-label="返回书架"
+            >
+              ←
+            </Link>
+            <div className="reader__top-title">
+              <div className="reader__book-title">{book.title}</div>
+              <div className="reader__chap-title">
+                {currentChapterTitle || `Page ${currentChapter}`}
+              </div>
+            </div>
+            <div className="reader__icon-btn reader__pct">{pct}%</div>
+          </header>
+        )}
+
+        <div
+          ref={scrollRef}
+          className="reader__content reader__content--pdf"
+          onClick={onContentClick}
+        >
+          {error && <p className="reader__error">加载失败：{error}</p>}
+          {loading && !error && <p className="reader__loading">加载中…</p>}
+          {!loading && !error && (
+            <iframe
+              key={currentChapter}
+              className="reader__pdf-frame"
+              src={pdfSrc}
+              title={book.title}
+            />
+          )}
+        </div>
+
+        {showChrome && (
+          <footer className="reader__bottom reader__bottom--pdf">
+            <button
+              className="reader__icon-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                goPDFPage(currentChapter - 1);
+              }}
+              disabled={currentChapter <= 1}
+              aria-label="上一页"
+            >
+              上页
+            </button>
+            <button
+              className="reader__icon-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowTOC(true);
+              }}
+              aria-label="页面目录"
+            >
+              目录
+            </button>
+            <div className="reader__pdf-page">
+              {currentChapter} / {pdfPageCount}
+            </div>
+            <button
+              className="reader__icon-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                goPDFPage(currentChapter + 1);
+              }}
+              disabled={currentChapter >= pdfPageCount}
+              aria-label="下一页"
+            >
+              下页
+            </button>
+          </footer>
+        )}
+
+        {showTOC && (
+          <div className="drawer" onClick={() => setShowTOC(false)}>
+            <aside
+              className="drawer__panel drawer__panel--narrow"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-label="页面目录"
+            >
+              <header className="drawer__header">
+                <h3>页面</h3>
+                <button className="drawer__close" onClick={() => setShowTOC(false)}>
+                  ✕
+                </button>
+              </header>
+              <ul className="toc toc--pdf">
+                {chapters.map((c) => (
+                  <li
+                    key={c.idx}
+                    className={`toc__node toc__node--d0${c.idx === currentChapter ? ' toc__node--active' : ''}`}
+                  >
+                    <button
+                      onClick={() => {
+                        setShowTOC(false);
+                        goPDFPage(c.idx);
+                      }}
+                    >
+                      {c.title}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </aside>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const renderedChapters: React.ReactNode[] = [];
   if (loadedRange) {

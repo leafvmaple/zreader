@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leafvmaple/zreader/internal/library"
 	"github.com/leafvmaple/zreader/internal/store"
 )
 
@@ -282,6 +284,71 @@ func TestDeleteBookMissingSourceConflictKeepsRow(t *testing.T) {
 	}
 }
 
+func TestImagePDFSourceReaderEndpoints(t *testing.T) {
+	ctx := context.Background()
+	bookDir := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	source := filepath.Join(bookDir, "ImageOnly - AuthorX.pdf")
+	if err := os.WriteFile(source, simplePDFBytes("ImageOnly", "AuthorX", nil), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+	scanner := &library.Scanner{Store: st}
+	if res, err := scanner.ScanSourceFiles(ctx, folder, []string{source}); err != nil {
+		t.Fatalf("ScanSourceFiles: %v", err)
+	} else if res.Added != 1 || len(res.Failed) != 0 {
+		t.Fatalf("scan result = %+v, want one added", res)
+	}
+	book := onlyBook(t, st, folder.ID)
+	if book.Format != "pdf-image" {
+		t.Fatalf("format = %q, want pdf-image", book.Format)
+	}
+	srv := New(Config{Port: 0, Store: st})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/source", nil)
+	rr := httptest.NewRecorder()
+	srv.newRouter().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("source status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Fatalf("content-type = %q, want application/pdf", got)
+	}
+	if !bytes.HasPrefix(rr.Body.Bytes(), []byte("%PDF-1.4")) {
+		t.Fatalf("source body does not look like pdf: %.16q", rr.Body.Bytes())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/content", nil)
+	rr = httptest.NewRecorder()
+	srv.newRouter().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("content status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/search?q=Alpha", nil)
+	rr = httptest.NewRecorder()
+	srv.newRouter().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("search status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/books/"+itoa(book.ID)+"?source=false", nil)
+	rr = httptest.NewRecorder()
+	srv.newRouter().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("source should remain after source=false delete: %v", err)
+	}
+}
+
 func TestDeleteBookRecordOnlyAllowsMissingSource(t *testing.T) {
 	ctx := context.Background()
 	bookDir := t.TempDir()
@@ -347,4 +414,48 @@ func onlyBook(t *testing.T, st *store.Store, folderID int64) store.Book {
 
 func itoa(n int64) string {
 	return strconv.FormatInt(n, 10)
+}
+
+func simplePDFBytes(title, author string, lines []string) []byte {
+	var content bytes.Buffer
+	content.WriteString("BT /F1 12 Tf\n")
+	for lineIdx, line := range lines {
+		y := 720 - lineIdx*24
+		words := strings.Fields(line)
+		for wordIdx, word := range words {
+			x := 72 + wordIdx*54
+			fmt.Fprintf(&content, "1 0 0 1 %d %d Tm (%s) Tj\n", x, y, escapeServerPDFString(word))
+		}
+	}
+	content.WriteString("ET\n")
+
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", content.Len(), content.String()),
+		fmt.Sprintf("<< /Title (%s) /Author (%s) >>", escapeServerPDFString(title), escapeServerPDFString(author)),
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("%PDF-1.4\n")
+	offsets := make([]int, 0, len(objects))
+	for i, obj := range objects {
+		offsets = append(offsets, buf.Len())
+		fmt.Fprintf(&buf, "%d 0 obj\n%s\nendobj\n", i+1, obj)
+	}
+	xref := buf.Len()
+	fmt.Fprintf(&buf, "xref\n0 %d\n", len(objects)+1)
+	buf.WriteString("0000000000 65535 f \n")
+	for _, off := range offsets {
+		fmt.Fprintf(&buf, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root 1 0 R /Info 6 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+	return buf.Bytes()
+}
+
+func escapeServerPDFString(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `(`, `\(`, `)`, `\)`)
+	return replacer.Replace(s)
 }

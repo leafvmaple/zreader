@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test:e2e": "pnpm build && node e2e/v07-smoke.mjs",
+    "test:e2e": "pnpm build && node e2e/v08-smoke.mjs",
     "typecheck": "tsc -b --noEmit",
     "preview": "vite preview"
   },

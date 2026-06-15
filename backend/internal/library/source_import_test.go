@@ -78,6 +78,18 @@ func TestFormatPDFToCache_CJKToUnicodeTextLayer(t *testing.T) {
 	}
 }
 
+func TestStripRepeatedPDFEdgeLines(t *testing.T) {
+	got := stripRepeatedPDFEdgeLines([]string{
+		"Header\n\nPage A body\n\nFooter",
+		"Header\n\nPage B body\n\nFooter",
+		"Header\n\nPage C body\n\nFooter",
+	})
+	want := []string{"Page A body", "Page B body", "Page C body"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("stripped pages = %#v, want %#v", got, want)
+	}
+}
+
 func TestExtractPDFText_NoTextLayer(t *testing.T) {
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "ImageOnly.pdf")
@@ -86,6 +98,26 @@ func TestExtractPDFText_NoTextLayer(t *testing.T) {
 	_, err := ExtractPDFText(src)
 	if !errors.Is(err, ErrPDFNoText) {
 		t.Fatalf("ExtractPDFText err = %v, want ErrPDFNoText", err)
+	}
+}
+
+func TestFormatPDFToCache_ImageOnlyPDF(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "ImageOnly - AuthorX.pdf")
+	writeSimplePDF(t, src, "ImageOnly", "AuthorX", nil)
+
+	cr, err := FormatPDFToCache(tmp, src)
+	if err != nil {
+		t.Fatalf("FormatPDFToCache: %v", err)
+	}
+	if cr.CacheFormat != "pdf-image" || cr.SourceEnc != "pdf-image" {
+		t.Fatalf("cache result = %+v, want pdf-image", cr)
+	}
+	if cr.Path != src || cr.SourcePath != src {
+		t.Fatalf("paths = (%q, %q), want source path %q", cr.Path, cr.SourcePath, src)
+	}
+	if cr.SourcePages != 1 {
+		t.Fatalf("SourcePages = %d, want 1", cr.SourcePages)
 	}
 }
 
@@ -115,6 +147,85 @@ func TestImportEpubToCache(t *testing.T) {
 	}
 	if len(book.Chapters) != 2 {
 		t.Fatalf("chapters = %d, want 2", len(book.Chapters))
+	}
+}
+
+func TestImportConvertibleEbookToCache_UsesConverter(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "SourceBook.mobi")
+	text := "Chapter 1\n\nConverted body paragraph.\n"
+	writeEpubFile(t, src, "ConvertedTitle", "ConvertedAuthor", text, []Chapter{
+		{Idx: 1, Title: "Chapter 1", Level: 0, ByteOffset: 0},
+	})
+	oldRunner := runEbookConvert
+	runEbookConvert = func(sourcePath, outPath string) error {
+		raw, err := os.ReadFile(sourcePath)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(outPath, raw, 0o644)
+	}
+	defer func() { runEbookConvert = oldRunner }()
+
+	cr, err := ImportConvertibleEbookToCache(tmp, src)
+	if err != nil {
+		t.Fatalf("ImportConvertibleEbookToCache: %v", err)
+	}
+	if cr.Title != "ConvertedTitle" || cr.Author != "ConvertedAuthor" || cr.SourceEnc != "mobi" {
+		t.Fatalf("cache result = %+v, want converted metadata and mobi source marker", cr)
+	}
+	book, err := ReadEpub(cr.Path)
+	if err != nil {
+		t.Fatalf("read converted cache: %v", err)
+	}
+	if !strings.Contains(book.FlatText, "Converted body paragraph.") {
+		t.Fatalf("flat text = %q, want converted body", book.FlatText)
+	}
+}
+
+func TestFormatToCache_ChapterSidecarOverridesParsedChapters(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "BookA - AuthorX.txt")
+	text := "Alpha opening paragraph.\n\nBeta second paragraph.\n"
+	if err := os.WriteFile(src, []byte(text), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	sidecar := `{
+		"chapters": [
+			{"title": "Manual A", "match": "Alpha opening"},
+			{"title": "Manual B", "match": "Beta second"}
+		]
+	}`
+	if err := os.WriteFile(ChapterSidecarPath(src), []byte(sidecar), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	cr, err := FormatToCache(tmp, src)
+	if err != nil {
+		t.Fatalf("FormatToCache: %v", err)
+	}
+	book, err := ReadEpub(cr.Path)
+	if err != nil {
+		t.Fatalf("read cached epub: %v", err)
+	}
+	if len(book.Chapters) != 2 || book.Chapters[0].Title != "Manual A" || book.Chapters[1].Title != "Manual B" {
+		t.Fatalf("chapters = %+v, want manual sidecar chapters", book.Chapters)
+	}
+	for _, want := range []string{"Alpha opening paragraph.", "Beta second paragraph."} {
+		if !strings.Contains(book.FlatText, want) {
+			t.Fatalf("flat text missing %q: %q", want, book.FlatText)
+		}
+	}
+	if book.Chapters[0].CharOffset != 0 || book.Chapters[1].CharOffset <= book.Chapters[0].CharOffset {
+		t.Fatalf("chapter offsets = %+v, want increasing sidecar offsets", book.Chapters)
+	}
+}
+
+func TestIsSupportedSource_ConvertibleEbooks(t *testing.T) {
+	for _, name := range []string{"BookA.mobi", "BookB.azw", "BookC.azw3"} {
+		if !IsSupportedSource(name) {
+			t.Fatalf("%s should be supported", name)
+		}
 	}
 }
 
@@ -180,6 +291,51 @@ func TestScannerScanFolder_SupportedSourceFormats(t *testing.T) {
 		if !got[title] {
 			t.Fatalf("missing scanned title %q; got=%v", title, got)
 		}
+	}
+}
+
+func TestScannerScanFolder_ImagePDF(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	bookDir := t.TempDir()
+
+	st, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+
+	src := filepath.Join(bookDir, "ImageOnly - AuthorX.pdf")
+	writeSimplePDF(t, src, "ImageOnly", "AuthorX", nil)
+
+	scanner := &Scanner{Store: st}
+	res, err := scanner.ScanFolder(ctx, folder)
+	if err != nil {
+		t.Fatalf("ScanFolder: %v", err)
+	}
+	if res.Added != 1 || len(res.Failed) != 0 {
+		t.Fatalf("scan result = %+v, want one added and no failures", res)
+	}
+	books, err := st.ListBooks(ctx, folder.ID)
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	if len(books) != 1 {
+		t.Fatalf("books = %+v, want one", books)
+	}
+	if books[0].Format != "pdf-image" || books[0].Path != src || books[0].CharCount.Int64 != 1 {
+		t.Fatalf("book = %+v, want pdf-image page book", books[0])
+	}
+	chapters, err := st.LoadChapters(ctx, books[0].ID)
+	if err != nil {
+		t.Fatalf("load chapters: %v", err)
+	}
+	if len(chapters) != 1 || chapters[0].Title != "Page 1" {
+		t.Fatalf("chapters = %+v, want Page 1", chapters)
 	}
 }
 
