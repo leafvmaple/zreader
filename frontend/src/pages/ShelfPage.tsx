@@ -8,8 +8,20 @@ type SortKey = 'recent' | 'title' | 'added';
 type BookAction = 'reparse' | 'delete';
 type StatusFilter = 'all' | 'favorite' | ReadingStatus;
 type ThemeMode = 'light' | 'dark';
+type ViewMode = 'list' | 'grid';
 
 const THEME_KEY = 'zreader.theme';
+const VIEW_KEY = 'zreader.view';
+
+function loadView(): ViewMode {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === 'grid' || v === 'list') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'list';
+}
 
 function currentTheme(): ThemeMode {
   if (typeof document === 'undefined') return 'light';
@@ -46,6 +58,32 @@ function ThemeIcon({ mode }: { mode: ThemeMode }) {
       <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.7" />
       <path
         d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ViewIcon({ mode }: { mode: ViewMode }) {
+  // Show the glyph for the view you'd switch *to*.
+  if (mode === 'list') {
+    // grid
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+  // list
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"
         stroke="currentColor"
         strokeWidth="1.7"
         strokeLinecap="round"
@@ -114,11 +152,24 @@ export function ShelfPage() {
   const [editBusy, setEditBusy] = useState(false);
   const [editMsg, setEditMsg] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(currentTheme);
+  const [view, setView] = useState<ViewMode>(loadView);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next: ThemeMode = prev === 'dark' ? 'light' : 'dark';
       applyTheme(next);
+      return next;
+    });
+  }, []);
+
+  const toggleView = useCallback(() => {
+    setView((prev) => {
+      const next: ViewMode = prev === 'grid' ? 'list' : 'grid';
+      try {
+        localStorage.setItem(VIEW_KEY, next);
+      } catch {
+        /* ignore */
+      }
       return next;
     });
   }, []);
@@ -455,6 +506,48 @@ export function ShelfPage() {
 
   // --- Render --------------------------------------------------------------
 
+  // Per-book management actions, shared by the list rows and the grid cards.
+  const bookActionButtons = (b: Book, action: BookAction | undefined) => (
+    <>
+      <button
+        type="button"
+        className="book-row__action"
+        onClick={() => openEdit(b)}
+        disabled={action !== undefined}
+        title="编辑元数据"
+      >
+        编辑
+      </button>
+      <button
+        type="button"
+        className="book-row__action"
+        onClick={() => void api.patchBook(b.id, { favorite: !b.favorite }).then(refresh)}
+        disabled={action !== undefined}
+        title={b.favorite ? '取消收藏' : '收藏'}
+      >
+        {b.favorite ? '取消★' : '收藏'}
+      </button>
+      <button
+        type="button"
+        className="book-row__action"
+        onClick={() => void onReparseBook(b)}
+        disabled={action !== undefined}
+        title="重新解析这本书"
+      >
+        {action === 'reparse' ? '解析中…' : '重解析'}
+      </button>
+      <button
+        type="button"
+        className="book-row__action book-row__action--danger"
+        onClick={() => void onDeleteBook(b)}
+        disabled={action !== undefined}
+        title="删除这本书"
+      >
+        {action === 'delete' ? '删除中…' : '删除'}
+      </button>
+    </>
+  );
+
   return (
     <main className="shelf">
       <header className="shelf__header">
@@ -509,7 +602,16 @@ export function ShelfPage() {
           <div className="shelf__actions">
             <button
               type="button"
-              className="shelf__btn shelf__btn--icon shelf__btn--ghost"
+              className="shelf__btn shelf__btn--icon shelf__btn--ghost shelf__btn--view"
+              onClick={toggleView}
+              aria-label={view === 'grid' ? '切换到列表视图' : '切换到网格视图'}
+              title={view === 'grid' ? '切换到列表视图' : '切换到网格视图'}
+            >
+              <ViewIcon mode={view} />
+            </button>
+            <button
+              type="button"
+              className="shelf__btn shelf__btn--icon shelf__btn--ghost shelf__btn--theme"
               onClick={toggleTheme}
               aria-label={theme === 'dark' ? '切换到浅色' : '切换到深色'}
               title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
@@ -667,6 +769,62 @@ export function ShelfPage() {
               ? '书库为空。点击右上「扫描书库」抓取已授权目录里的 .txt / .epub / .pdf / .mobi / .azw3 文件。'
               : '没有匹配的结果。'}
           </p>
+        ) : view === 'grid' ? (
+          <ul className="book-grid">
+            {filtered.map((b) => {
+              const p = progress[b.id];
+              const pct = b.char_count ? Math.round(((p?.char_offset ?? 0) / b.char_count) * 100) : 0;
+              const action = bookBusy[b.id];
+              const isSelected = selected.includes(b.id);
+              return (
+                <li key={b.id} className={`book-card${isSelected ? ' is-selected' : ''}`}>
+                  <label className="book-card__select" aria-label={`选择 ${b.title}`}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelected(b.id)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={`book-card__fav${b.favorite ? ' is-active' : ''}`}
+                    onClick={() => void api.patchBook(b.id, { favorite: !b.favorite }).then(refresh)}
+                    disabled={action !== undefined}
+                    aria-label={b.favorite ? '取消收藏' : '收藏'}
+                    title={b.favorite ? '取消收藏' : '收藏'}
+                  >
+                    ★
+                  </button>
+                  <Link to={`/read/${b.id}`} className="book-card__link">
+                    <div
+                      className="book-card__cover"
+                      style={{ '--cc': b.cover_color || '#596070' } as React.CSSProperties}
+                    >
+                      {b.cover_label || b.title.slice(0, 1)}
+                    </div>
+                  </Link>
+                  <div className="book-card__body">
+                    <Link to={`/read/${b.id}`} className="book-card__title" title={b.title}>
+                      {b.title}
+                    </Link>
+                    <div className="book-card__meta">
+                      <span className={`book-row__status book-row__status--${b.reading_status}`}>
+                        {STATUS_LABELS[b.reading_status]}
+                      </span>
+                      <span className="book-row__author">{b.author ?? '佚名'}</span>
+                    </div>
+                    <div className="book-card__progress">
+                      <div className="book-row__bar">
+                        <div className="book-row__bar-fill" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="book-card__pct">{pct}%</span>
+                    </div>
+                    <div className="book-card__actions">{bookActionButtons(b, action)}</div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         ) : (
           <ul className="book-list">
             {filtered.map((b) => {
@@ -723,44 +881,7 @@ export function ShelfPage() {
                     </div>
                     <div className="book-row__cta">{pct > 0 ? '继续阅读' : '开始阅读'}</div>
                   </Link>
-                  <div className="book-row__actions">
-                    <button
-                      type="button"
-                      className="book-row__action"
-                      onClick={() => openEdit(b)}
-                      disabled={action !== undefined}
-                      title="编辑元数据"
-                    >
-                      编辑
-                    </button>
-                    <button
-                      type="button"
-                      className="book-row__action"
-                      onClick={() => void api.patchBook(b.id, { favorite: !b.favorite }).then(refresh)}
-                      disabled={action !== undefined}
-                      title={b.favorite ? '取消收藏' : '收藏'}
-                    >
-                      {b.favorite ? '取消★' : '收藏'}
-                    </button>
-                    <button
-                      type="button"
-                      className="book-row__action"
-                      onClick={() => void onReparseBook(b)}
-                      disabled={action !== undefined}
-                      title="重新解析这本书"
-                    >
-                      {action === 'reparse' ? '解析中…' : '重解析'}
-                    </button>
-                    <button
-                      type="button"
-                      className="book-row__action book-row__action--danger"
-                      onClick={() => void onDeleteBook(b)}
-                      disabled={action !== undefined}
-                      title="删除这本书"
-                    >
-                      {action === 'delete' ? '删除中…' : '删除'}
-                    </button>
-                  </div>
+                  <div className="book-row__actions">{bookActionButtons(b, action)}</div>
                 </li>
               );
             })}
