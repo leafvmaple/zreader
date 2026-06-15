@@ -174,6 +174,26 @@ try {
   assert((await page.locator('.book-row').count()) === 1, 'uploaded book row missing');
   assert((await page.locator('.book-row').first().locator('.book-row__action').count()) === 4, 'book row actions missing');
 
+  // P1: toolbar is split into a filter group and an action group.
+  assert((await page.locator('.shelf__filters').count()) === 1, 'toolbar filter group missing');
+  assert((await page.locator('.shelf__actions').count()) === 1, 'toolbar action group missing');
+
+  // P0: the theme toggle flips data-theme on <html>, persists the choice to
+  // localStorage, and round-trips back to the starting theme.
+  const themeBefore = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+  await page.locator('.shelf__btn--icon').click();
+  const themeAfter = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+  assert(themeAfter && themeAfter !== themeBefore, 'theme toggle did not change data-theme');
+  assert(
+    (await page.evaluate(() => localStorage.getItem('zreader.theme'))) === themeAfter,
+    'theme choice was not persisted',
+  );
+  await page.locator('.shelf__btn--icon').click();
+  assert(
+    (await page.evaluate(() => document.documentElement.getAttribute('data-theme'))) === themeBefore,
+    'theme toggle did not round-trip to the starting theme',
+  );
+
   const secondUploadPath = path.join(tempRoot, 'BookB - AuthorY.txt');
   await writeFile(secondUploadPath, longBookText('OldNeedle'), 'utf8');
   await page.getByRole('button', { name: '添加书籍' }).click();
@@ -204,6 +224,12 @@ try {
   await page.waitForFunction(() => document.body.textContent.includes('EditedTitle'));
   assert(await page.locator('.book-row__tags span', { hasText: 'TagA' }).count() > 0, 'edited tags not visible');
 
+  // P1: reading status renders as a highlighted chip and the developer-facing
+  // encoding is no longer part of the meta line.
+  assert((await page.locator('.book-row__status--reading').count()) >= 1, 'reading status chip missing');
+  const firstMetaText = await page.locator('.book-row__meta').first().innerText();
+  assert(!/utf-?8/i.test(firstMetaText), 'encoding should no longer appear in the book meta line');
+
   await page.locator('.book-row__select input').nth(0).check();
   await page.locator('.book-row__select input').nth(1).check();
   await page.locator('.batch-bar input').fill('BatchTag');
@@ -228,6 +254,17 @@ try {
   await page.waitForURL(/\/read\/\d+/, { timeout: 10_000 });
   await page.waitForSelector('.reader__article');
   assert((await page.locator('.reader__error').count()) === 0, 'reader loaded with an error');
+
+  // P1: chrome uses one SVG icon set; search lives only in the top bar and
+  // settings only in the bottom bar — no controls duplicated across bars.
+  const topIcons = page.locator('.reader__top button.reader__icon-btn');
+  const bottomIcons = page.locator('.reader__bottom button.reader__icon-btn');
+  assert((await topIcons.count()) === 2, 'reader top bar should have exactly search + add-bookmark');
+  assert((await bottomIcons.count()) === 3, 'reader bottom bar should have exactly toc + bookmarks + settings');
+  assert(
+    (await topIcons.locator('svg').count()) === 2 && (await bottomIcons.locator('svg').count()) === 3,
+    'reader chrome buttons should render svg icons, not text or emoji',
+  );
 
   await page.locator('.reader__top button.reader__icon-btn').nth(0).click();
   assert(await page.locator('.reader-search').isVisible(), 'search drawer did not open');
