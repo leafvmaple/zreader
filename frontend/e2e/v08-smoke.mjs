@@ -248,7 +248,8 @@ try {
   assert((await page.locator('.bookmark-list li').count()) === 1, 'bookmark was not created');
   await page.keyboard.press('Escape');
 
-  await page.locator('.reader__top button.reader__icon-btn').nth(2).click();
+  // Settings now lives in the bottom bar (TOC=0, bookmarks=1, settings=2).
+  await page.locator('.reader__bottom button.reader__icon-btn').nth(2).click();
   await page.locator('.settings__seg').nth(0).locator('button').nth(0).click();
   assert(await page.locator('.reader.reader--line-compact').count() === 1, 'line-height setting did not apply');
   await page.keyboard.press('Escape');
@@ -275,7 +276,7 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 });
   const imagePDFPath = path.join(tempRoot, 'ImageOnly - AuthorX.pdf');
   await writeFile(imagePDFPath, simplePDFBytes('ImageOnly', 'AuthorX'));
-  await page.locator('.shelf__toolbar button').nth(2).click();
+  await page.getByRole('button', { name: '添加书籍' }).click();
   await page.locator('.upload-dialog input[type=file]').setInputFiles(imagePDFPath);
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/library/upload') && r.status() === 201),
