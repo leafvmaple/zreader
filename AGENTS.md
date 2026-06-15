@@ -278,6 +278,22 @@ fix; "I think this works" failed before and will fail again.
 This applies to new features too — building the feature without
 driving the real flow that uses it counts as half done.
 
+### Test gate policy
+
+- **Before pushing a feature change**, run incremental tests that match the
+  changed surface and add or update tests for the feature first. Examples:
+  backend-only changes run the touched package tests (or the narrowest useful
+  `go test` target); frontend-only changes run typecheck/build or the targeted
+  browser probe; parser/import changes run the relevant library tests and any
+  available corpus regression for that area.
+- **Before creating a release or pushing a release tag**, run the full project
+  test gate: `cd backend && go test ./...`, `cd frontend && corepack pnpm
+  test:e2e`, plus any available corpus regression or release-specific checks.
+  Do not tag until these pass.
+- If an expected test cannot run because the local environment is missing a
+  dependency or permission, state that explicitly before pushing; do not
+  release unless the user accepts the gap.
+
 ### Tool chain (Windows host)
 
 - **pnpm** is not on PATH by default. Bring it up via corepack —
