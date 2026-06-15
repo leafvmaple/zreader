@@ -6,6 +6,75 @@ import { useThrottledProgress } from '../hooks/useThrottledProgress';
 import type { Book, Bookmark, Chapter, Progress, SearchMatch } from '../types/api';
 import './ReaderPage.css';
 
+// Consistent line-icon set for the reader chrome — replaces the earlier mix
+// of Chinese labels, emoji (☆ ⚙), and arrows so every control reads as part
+// of one toolbar.
+function Glyph({ children }: { children: React.ReactNode }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+const IconBack = () => (
+  <Glyph>
+    <path d="M15 5l-7 7 7 7" />
+  </Glyph>
+);
+const IconSearch = () => (
+  <Glyph>
+    <circle cx="11" cy="11" r="7" />
+    <path d="M20.5 20.5L16 16" />
+  </Glyph>
+);
+const IconBookmarkPlus = () => (
+  <Glyph>
+    <path d="M6 4h12v16l-6-4-6 4z" />
+    <path d="M12 8.5v4M10 10.5h4" />
+  </Glyph>
+);
+const IconBookmark = () => (
+  <Glyph>
+    <path d="M6 4h12v16l-6-4-6 4z" />
+  </Glyph>
+);
+const IconList = () => (
+  <Glyph>
+    <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />
+  </Glyph>
+);
+const IconSettings = () => (
+  <Glyph>
+    <path d="M4 7h7M15 7h5" />
+    <circle cx="13" cy="7" r="2" />
+    <path d="M4 12h4M12 12h8" />
+    <circle cx="10" cy="12" r="2" />
+    <path d="M4 17h11M19 17h1" />
+    <circle cx="17" cy="17" r="2" />
+  </Glyph>
+);
+const IconChevronLeft = () => (
+  <Glyph>
+    <path d="M15 6l-6 6 6 6" />
+  </Glyph>
+);
+const IconChevronRight = () => (
+  <Glyph>
+    <path d="M9 6l6 6-6 6" />
+  </Glyph>
+);
+
 type Theme = 'beige' | 'white' | 'grey' | 'dark';
 type FontSize = 'sm' | 'md' | 'lg' | 'xl';
 type FontFamily = 'system' | 'songti' | 'wenkai';
@@ -880,8 +949,9 @@ export function ReaderPage() {
               className="reader__icon-btn"
               onClick={() => void flush()}
               aria-label="返回书架"
+              title="返回书架"
             >
-              ←
+              <IconBack />
             </Link>
             <div className="reader__top-title">
               <div className="reader__book-title">{book.title}</div>
@@ -889,7 +959,7 @@ export function ReaderPage() {
                 {currentChapterTitle || `Page ${currentChapter}`}
               </div>
             </div>
-            <div className="reader__icon-btn reader__pct">{pct}%</div>
+            <div className="reader__pct">{pct}%</div>
           </header>
         )}
 
@@ -920,8 +990,9 @@ export function ReaderPage() {
               }}
               disabled={currentChapter <= 1}
               aria-label="上一页"
+              title="上一页"
             >
-              上页
+              <IconChevronLeft />
             </button>
             <button
               className="reader__icon-btn"
@@ -930,8 +1001,9 @@ export function ReaderPage() {
                 setShowTOC(true);
               }}
               aria-label="页面目录"
+              title="目录"
             >
-              目录
+              <IconList />
             </button>
             <div className="reader__pdf-page">
               {currentChapter} / {pdfPageCount}
@@ -944,8 +1016,9 @@ export function ReaderPage() {
               }}
               disabled={currentChapter >= pdfPageCount}
               aria-label="下一页"
+              title="下一页"
             >
-              下页
+              <IconChevronRight />
             </button>
           </footer>
         )}
@@ -1012,21 +1085,22 @@ export function ReaderPage() {
             className="reader__icon-btn"
             onClick={() => void flush()}
             aria-label="返回书架"
+            title="返回书架"
           >
-            ←
+            <IconBack />
           </Link>
           <div className="reader__top-title">
             <div className="reader__book-title">{book?.title ?? ''}</div>
             <div className="reader__chap-title">{currentChapterTitle}</div>
           </div>
-          <div className="reader__icon-btn reader__pct">{pct}%</div>
+          <div className="reader__pct">{pct}%</div>
           <button
             className="reader__icon-btn"
             onClick={() => setShowSearch(true)}
             aria-label="搜索"
             title="搜索"
           >
-            搜索
+            <IconSearch />
           </button>
           <button
             className="reader__icon-btn"
@@ -1034,15 +1108,7 @@ export function ReaderPage() {
             aria-label="添加书签"
             title="添加书签"
           >
-            ☆
-          </button>
-          <button
-            className="reader__icon-btn"
-            onClick={() => setShowSettings(true)}
-            aria-label="阅读设置"
-            title="设置"
-          >
-            ⚙
+            <IconBookmarkPlus />
           </button>
         </header>
       )}
@@ -1072,18 +1138,9 @@ export function ReaderPage() {
               setShowTOC(true);
             }}
             aria-label="章节目录"
+            title="目录"
           >
-            目录
-          </button>
-          <button
-            className="reader__icon-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowSearch(true);
-            }}
-            aria-label="搜索"
-          >
-            搜索
+            <IconList />
           </button>
           <button
             className="reader__icon-btn"
@@ -1092,8 +1149,9 @@ export function ReaderPage() {
               setShowBookmarks(true);
             }}
             aria-label="书签"
+            title="书签"
           >
-            书签
+            <IconBookmark />
           </button>
           <div className="reader__progress-track">
             <div className="reader__progress-fill" style={{ width: `${pct}%` }} />
@@ -1105,8 +1163,9 @@ export function ReaderPage() {
               setShowSettings(true);
             }}
             aria-label="阅读设置"
+            title="设置"
           >
-            Aa
+            <IconSettings />
           </button>
         </footer>
       )}

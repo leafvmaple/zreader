@@ -134,17 +134,21 @@
 }
 
 .reader__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: 1px solid transparent;
   color: var(--r-fg);
-  font-size: 16px;
-  padding: 6px 12px;
+  padding: 8px;
   border-radius: 8px;
   cursor: pointer;
   text-decoration: none;
-  transition: background 80ms ease;
+  transition: background 80ms ease, color 80ms ease;
   user-select: none;
 }
+
+.reader__icon-btn svg { display: block; }
 
 .reader__icon-btn:hover { background: var(--r-overlay); }
 .reader__icon-btn:disabled {
@@ -153,7 +157,13 @@
   opacity: 0.45;
 }
 .reader__icon-btn:disabled:hover { background: transparent; }
-.reader__pct { cursor: default; font-size: 13px; color: var(--r-fg-muted); }
+.reader__pct {
+  cursor: default;
+  font-size: 13px;
+  color: var(--r-fg-muted);
+  padding: 0 4px;
+  white-space: nowrap;
+}
 
 .reader__progress-track {
   flex: 1;

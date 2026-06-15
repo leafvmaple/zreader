@@ -463,83 +463,88 @@ export function ShelfPage() {
           <span className="shelf__count">{books.length} 本</span>
         </div>
         <div className="shelf__toolbar">
-          <input
-            type="search"
-            placeholder="搜索书名 / 作者"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="shelf__search"
-          />
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-            className="shelf__sort"
-            aria-label="排序方式"
-          >
-            <option value="recent">最近阅读</option>
-            <option value="added">最近添加</option>
-            <option value="title">按书名</option>
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            className="shelf__sort"
-            aria-label="阅读状态"
-          >
-            <option value="all">全部状态</option>
-            <option value="favorite">收藏</option>
-            <option value="unread">未读</option>
-            <option value="reading">在读</option>
-            <option value="finished">已读完</option>
-            <option value="paused">搁置</option>
-          </select>
-          <select
-            value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
-            className="shelf__sort"
-            aria-label="标签筛选"
-          >
-            <option value="">全部标签</option>
-            {tags.map((tag) => (
-              <option key={tag.id} value={tag.name}>{tag.name}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="shelf__btn shelf__btn--icon"
-            onClick={toggleTheme}
-            aria-label={theme === 'dark' ? '切换到浅色' : '切换到深色'}
-            title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
-          >
-            <ThemeIcon mode={theme} />
-          </button>
-          <button
-            type="button"
-            className="shelf__btn"
-            onClick={() => setShowDuplicates((v) => !v)}
-          >
-            重复 {duplicates.length}
-          </button>
-          <button
-            type="button"
-            className="shelf__btn"
-            onClick={() => setShowJobs((v) => !v)}
-          >
-            任务
-          </button>
-          <button
-            onClick={() => {
-              setUploadOpen(true);
-              setUploadMsg(null);
-            }}
-            disabled={uploadBusy}
-            className="shelf__btn"
-          >
-            添加书籍
-          </button>
-          <button onClick={onScan} disabled={scanBusy} className="shelf__btn shelf__btn--primary">
-            {scanBusy ? '扫描中…' : '扫描书库'}
-          </button>
+          <div className="shelf__filters">
+            <input
+              type="search"
+              placeholder="搜索书名 / 作者"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="shelf__search"
+            />
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+              className="shelf__sort"
+              aria-label="排序方式"
+            >
+              <option value="recent">最近阅读</option>
+              <option value="added">最近添加</option>
+              <option value="title">按书名</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              className="shelf__sort"
+              aria-label="阅读状态"
+            >
+              <option value="all">全部状态</option>
+              <option value="favorite">收藏</option>
+              <option value="unread">未读</option>
+              <option value="reading">在读</option>
+              <option value="finished">已读完</option>
+              <option value="paused">搁置</option>
+            </select>
+            <select
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="shelf__sort"
+              aria-label="标签筛选"
+            >
+              <option value="">全部标签</option>
+              {tags.map((tag) => (
+                <option key={tag.id} value={tag.name}>{tag.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="shelf__actions">
+            <button
+              type="button"
+              className="shelf__btn shelf__btn--icon shelf__btn--ghost"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+              title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+            >
+              <ThemeIcon mode={theme} />
+            </button>
+            <button
+              type="button"
+              className="shelf__btn shelf__btn--ghost"
+              onClick={() => setShowDuplicates((v) => !v)}
+            >
+              重复{duplicates.length > 0 ? ` ${duplicates.length}` : ''}
+            </button>
+            <button
+              type="button"
+              className="shelf__btn shelf__btn--ghost"
+              onClick={() => setShowJobs((v) => !v)}
+            >
+              任务
+            </button>
+            <span className="shelf__divider" aria-hidden="true" />
+            <button
+              onClick={() => {
+                setUploadOpen(true);
+                setUploadMsg(null);
+              }}
+              disabled={uploadBusy}
+              className="shelf__btn"
+            >
+              添加书籍
+            </button>
+            <button onClick={onScan} disabled={scanBusy} className="shelf__btn shelf__btn--primary">
+              {scanBusy ? '扫描中…' : '扫描书库'}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -630,12 +635,20 @@ export function ShelfPage() {
               const pct = b.char_count ? Math.round(((p?.char_offset ?? 0) / b.char_count) * 100) : 0;
               return (
                 <Link to={`/read/${b.id}`} key={b.id} className="continue-card">
-                  <div className="continue-card__title">{b.title}</div>
-                  <div className="continue-card__meta">
-                    {b.author ?? '佚名'} · 已读 {pct}%
+                  <div
+                    className="continue-card__cover"
+                    style={{ '--cc': b.cover_color || '#596070' } as React.CSSProperties}
+                  >
+                    {b.cover_label || b.title.slice(0, 1)}
                   </div>
-                  <div className="continue-card__bar">
-                    <div className="continue-card__bar-fill" style={{ width: `${pct}%` }} />
+                  <div className="continue-card__body">
+                    <div className="continue-card__title">{b.title}</div>
+                    <div className="continue-card__meta">
+                      {b.author ?? '佚名'} · 已读 {pct}%
+                    </div>
+                    <div className="continue-card__bar">
+                      <div className="continue-card__bar-fill" style={{ width: `${pct}%` }} />
+                    </div>
                   </div>
                 </Link>
               );
@@ -673,7 +686,7 @@ export function ShelfPage() {
                   <Link to={`/read/${b.id}`} className="book-row__link">
                     <div
                       className="book-row__cover"
-                      style={{ backgroundColor: b.cover_color || '#596070' }}
+                      style={{ '--cc': b.cover_color || '#596070' } as React.CSSProperties}
                     >
                       {b.cover_label || b.title.slice(0, 1)}
                     </div>
@@ -683,21 +696,16 @@ export function ShelfPage() {
                         {b.title}
                       </div>
                       <div className="book-row__meta">
-                        <span>{b.author ?? '佚名'}</span>
-                        <span>·</span>
-                        <span>{STATUS_LABELS[b.reading_status]}</span>
-                        {b.category && (
-                          <>
-                            <span>·</span>
-                            <span>{b.category}</span>
-                          </>
-                        )}
-                        <span>·</span>
-                        <span>{(b.char_count ?? 0).toLocaleString()} 字</span>
-                        <span>·</span>
-                        <span>{b.chapter_count ?? 0} 章</span>
-                        <span>·</span>
-                        <span>{b.encoding ?? '?'}</span>
+                        <span
+                          className={`book-row__status book-row__status--${b.reading_status}`}
+                        >
+                          {STATUS_LABELS[b.reading_status]}
+                        </span>
+                        <span className="book-row__author">{b.author ?? '佚名'}</span>
+                        {b.category && <span className="book-row__cat">{b.category}</span>}
+                        <span className="book-row__stat">
+                          {(b.char_count ?? 0).toLocaleString()} 字 · {b.chapter_count ?? 0} 章
+                        </span>
                       </div>
                       {(b.tags ?? []).length > 0 && (
                         <div className="book-row__tags">
