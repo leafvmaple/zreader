@@ -7,6 +7,52 @@ import './ShelfPage.css';
 type SortKey = 'recent' | 'title' | 'added';
 type BookAction = 'reparse' | 'delete';
 type StatusFilter = 'all' | 'favorite' | ReadingStatus;
+type ThemeMode = 'light' | 'dark';
+
+const THEME_KEY = 'zreader.theme';
+
+function currentTheme(): ThemeMode {
+  if (typeof document === 'undefined') return 'light';
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+function applyTheme(mode: ThemeMode) {
+  document.documentElement.setAttribute('data-theme', mode);
+  try {
+    localStorage.setItem(THEME_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+function ThemeIcon({ mode }: { mode: ThemeMode }) {
+  // Show the glyph for the mode you'd switch *to*.
+  if (mode === 'light') {
+    // moon
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8Z"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  // sun
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 const STATUS_LABELS: Record<ReadingStatus, string> = {
   unread: '未读',
@@ -67,6 +113,15 @@ export function ShelfPage() {
   });
   const [editBusy, setEditBusy] = useState(false);
   const [editMsg, setEditMsg] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(currentTheme);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next: ThemeMode = prev === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      return next;
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -449,6 +504,15 @@ export function ShelfPage() {
               <option key={tag.id} value={tag.name}>{tag.name}</option>
             ))}
           </select>
+          <button
+            type="button"
+            className="shelf__btn shelf__btn--icon"
+            onClick={toggleTheme}
+            aria-label={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+            title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+          >
+            <ThemeIcon mode={theme} />
+          </button>
           <button
             type="button"
             className="shelf__btn"

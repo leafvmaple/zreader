@@ -56,16 +56,26 @@
   transition: transform 80ms ease, background 80ms ease;
 }
 
-.shelf__btn:hover { background: rgba(255, 255, 255, 0.06); }
+.shelf__btn:hover { background: var(--hover); }
 .shelf__btn:active { transform: translateY(1px); }
 
+.shelf__btn--icon {
+  width: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.shelf__btn--icon:hover { color: var(--text); }
+
 .shelf__btn--primary {
-  background: #4a5058;
-  color: #f5f5f5;
+  background: var(--accent);
+  color: var(--accent-fg);
   border-color: transparent;
 }
 
-.shelf__btn--primary:hover { background: #5a6068; }
+.shelf__btn--primary:hover { background: var(--accent-strong); }
 
 .shelf__btn:disabled { opacity: 0.6; cursor: progress; }
 
@@ -202,7 +212,7 @@
 
 .upload-dialog__error {
   margin-top: 12px;
-  color: #a33;
+  color: var(--danger);
   font-size: 13px;
 }
 
@@ -222,9 +232,9 @@
 }
 
 .shelf__notice--error {
-  background: #fff1f0;
-  border-color: #f3c6c2;
-  color: #a33;
+  background: var(--danger-weak);
+  border-color: var(--danger-border);
+  color: var(--danger);
 }
 
 .library-panel,
@@ -351,9 +361,9 @@
 }
 
 .batch-bar__danger:hover {
-  color: #a33;
-  border-color: #d7aaa6;
-  background: #fff1f0;
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-weak);
 }
 
 .shelf__section + .shelf__section { margin-top: 32px; }
@@ -394,7 +404,8 @@
 
 .continue-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-hover);
+  border-color: var(--accent);
 }
 
 .continue-card__title {
@@ -414,7 +425,7 @@
 
 .continue-card__bar {
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--track);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -447,7 +458,7 @@
 }
 
 .book-row.is-selected {
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--accent-weak);
 }
 
 .book-row__select {
@@ -468,7 +479,7 @@
   min-width: 0;
 }
 
-.book-row__link:hover { background: rgba(255, 255, 255, 0.04); }
+.book-row__link:hover { background: var(--hover); }
 
 .book-row__cover {
   width: 54px;
@@ -518,7 +529,7 @@
 
 .book-row__bar {
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--track);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -570,13 +581,13 @@
 
 .book-row__action:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--hover);
 }
 
 .book-row__action--danger:hover {
-  color: #a33;
-  border-color: #d7aaa6;
-  background: #fff1f0;
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-weak);
 }
 
 .book-row__action:disabled {

@@ -1,16 +1,57 @@
 :root {
-  --bg: #2d3033;
-  --surface: #3a3d41;
-  --text: #d4d6d8;
-  --text-muted: #888c91;
-  --accent: #c5c7ca;
-  --border: rgba(255, 255, 255, 0.08);
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  /* Light theme (default). The shelf + dialogs read these tokens; the reader
+   * page is self-contained and themes itself via its own --r-* variables. */
+  --bg: #f2f3f6;
+  --surface: #ffffff;
+  --surface-2: #eceef2;
+  --text: #20242b;
+  --text-muted: #69727e;
+  --border: #e2e6ec;
+  --hover: rgba(20, 30, 50, 0.05);
+  --track: rgba(20, 30, 50, 0.10);
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.07);
+  --shadow-hover: 0 12px 30px rgba(16, 24, 40, 0.16);
 
+  /* Single brand accent — calm teal that pairs with the warm reading themes
+   * and reads naturally as "amount read" on progress bars. */
+  --accent: #0f7d6e;
+  --accent-strong: #0b5f54;
+  --accent-fg: #ffffff;
+  --accent-weak: rgba(15, 125, 110, 0.10);
+
+  --danger: #c0392b;
+  --danger-weak: #fdecea;
+  --danger-border: #f1c4bf;
+
+  color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', 'Source Han Sans SC', sans-serif;
   color: var(--text);
   background: var(--bg);
+}
+
+:root[data-theme='dark'] {
+  --bg: #1c1e22;
+  --surface: #292c31;
+  --surface-2: #33373d;
+  --text: #e2e5e9;
+  --text-muted: #949ba4;
+  --border: rgba(255, 255, 255, 0.10);
+  --hover: rgba(255, 255, 255, 0.06);
+  --track: rgba(255, 255, 255, 0.12);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.40);
+  --shadow-hover: 0 12px 30px rgba(0, 0, 0, 0.55);
+
+  --accent: #46b9a6;
+  --accent-strong: #5fc7b6;
+  --accent-fg: #11201d;
+  --accent-weak: rgba(70, 185, 166, 0.16);
+
+  --danger: #e88a82;
+  --danger-weak: rgba(224, 90, 80, 0.14);
+  --danger-border: rgba(224, 90, 80, 0.40);
+
+  color-scheme: dark;
 }
 
 * {
@@ -35,7 +76,7 @@ a {
 
 code {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--hover);
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 0.92em;
