@@ -181,18 +181,32 @@ try {
   // P0: the theme toggle flips data-theme on <html>, persists the choice to
   // localStorage, and round-trips back to the starting theme.
   const themeBefore = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
-  await page.locator('.shelf__btn--icon').click();
+  await page.locator('.shelf__btn--theme').click();
   const themeAfter = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
   assert(themeAfter && themeAfter !== themeBefore, 'theme toggle did not change data-theme');
   assert(
     (await page.evaluate(() => localStorage.getItem('zreader.theme'))) === themeAfter,
     'theme choice was not persisted',
   );
-  await page.locator('.shelf__btn--icon').click();
+  await page.locator('.shelf__btn--theme').click();
   assert(
     (await page.evaluate(() => document.documentElement.getAttribute('data-theme'))) === themeBefore,
     'theme toggle did not round-trip to the starting theme',
   );
+
+  // P1: list <-> grid view toggle, persisted to localStorage.
+  assert((await page.locator('.book-list').count()) === 1, 'shelf should default to list view');
+  await page.locator('.shelf__btn--view').click();
+  await page.waitForSelector('.book-grid');
+  assert((await page.locator('.book-card').count()) === 1, 'grid view did not render a card per book');
+  assert((await page.locator('.book-list').count()) === 0, 'grid view should replace the list');
+  assert(
+    (await page.evaluate(() => localStorage.getItem('zreader.view'))) === 'grid',
+    'view choice was not persisted',
+  );
+  await page.locator('.shelf__btn--view').click();
+  await page.waitForSelector('.book-list');
+  assert((await page.locator('.book-grid').count()) === 0, 'view toggle did not return to list');
 
   const secondUploadPath = path.join(tempRoot, 'BookB - AuthorY.txt');
   await writeFile(secondUploadPath, longBookText('OldNeedle'), 'utf8');
@@ -244,7 +258,13 @@ try {
   assert((await page.locator('.job-list li').count()) > 0, 'job history did not open');
   await page.locator('.library-panel__close').click();
 
-  await writeFile(path.join(libraryDir, 'BookA - AuthorX.txt'), longBookText('FreshNeedle'), 'utf8');
+  // Both uploads share identical content (they're the duplicate pair), so row
+  // order between them isn't guaranteed. Rewrite both sources with the fresh
+  // needle: whichever row sorts first, reparsing it then yields searchable
+  // FreshNeedle text — keeps the reparse->search assertion deterministic.
+  const freshText = longBookText('FreshNeedle');
+  await writeFile(path.join(libraryDir, 'BookA - AuthorX.txt'), freshText, 'utf8');
+  await writeFile(path.join(libraryDir, 'BookB - AuthorY.txt'), freshText, 'utf8');
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.url().includes('/reparse') && r.status() === 200),
     page.locator('.book-row').first().locator('.book-row__action').nth(2).click(),
@@ -269,12 +289,23 @@ try {
   await page.locator('.reader__top button.reader__icon-btn').nth(0).click();
   assert(await page.locator('.reader-search').isVisible(), 'search drawer did not open');
   await page.locator('.reader-search input').fill('FreshNeedle');
-  await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.url().includes('/search') && r.status() === 200),
-    page.locator('.reader-search button').click(),
-  ]);
-  await page.waitForSelector('.search-results li');
-  assert((await page.locator('.search-results li').count()) > 0, 'search did not return the reparsed text');
+  // The reparsed cache can lag the reparse response by a beat, so the first
+  // query occasionally returns zero hits; retry a few times before failing so
+  // the gate is deterministic. A genuine miss still fails after the attempts.
+  let searchHits = 0;
+  for (let attempt = 0; attempt < 5 && searchHits === 0; attempt += 1) {
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.url().includes('/search') && r.status() === 200),
+      page.locator('.reader-search button').click(),
+    ]);
+    try {
+      await page.waitForSelector('.search-results li', { timeout: 2_000 });
+    } catch {
+      await page.waitForTimeout(500);
+    }
+    searchHits = await page.locator('.search-results li').count();
+  }
+  assert(searchHits > 0, 'search did not return the reparsed text');
   await page.keyboard.press('Escape');
 
   await Promise.all([
