@@ -265,6 +265,63 @@
 
 .reader__error { color: #e08585; }
 
+/* --- First-entry hint ---------------------------------------------------- */
+
+.reader__hint {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.34);
+  animation: hint-fade 160ms ease;
+}
+
+@keyframes hint-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.reader__hint-card {
+  max-width: 280px;
+  text-align: center;
+  background: var(--r-bg);
+  color: var(--r-fg);
+  border: 1px solid var(--r-line-color);
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.4);
+}
+
+.reader__hint-card p {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.reader__hint-card b { color: var(--r-accent); font-weight: 600; }
+
+.reader__hint-sub {
+  color: var(--r-fg-muted);
+  font-size: 13px;
+}
+
+.reader__hint-ok {
+  margin-top: 14px;
+  padding: 8px 22px;
+  border-radius: 8px;
+  border: 1px solid var(--r-accent);
+  background: transparent;
+  color: var(--r-accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.reader__hint-ok:hover { background: var(--r-overlay); }
+
 /* --- Drawers ------------------------------------------------------------- */
 
 .drawer {
@@ -536,7 +593,7 @@
   font: inherit;
   font-size: 14px;
   cursor: pointer;
-  margin-bottom: 20px;
+  margin-top: 24px;
   transition: background 80ms ease, border-color 80ms ease;
 }
 

@@ -132,6 +132,7 @@ const MARGIN_LABELS: Record<PageMargin, string> = {
   wide: '宽',
 };
 const SETTINGS_KEY = 'zreader.settings';
+const HINT_KEY = 'zreader.reader.hinted';
 
 // Server caps content slice at 50k chars per request.
 const CHUNK = 50_000;
@@ -363,6 +364,14 @@ export function ReaderPage() {
   const [showSearch, setShowSearch] = useState(false);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showChrome, setShowChrome] = useState(true);
+  // One-time hint teaching the tap-to-toggle-chrome / tap-zone interaction.
+  const [showHint, setShowHint] = useState(() => {
+    try {
+      return !localStorage.getItem(HINT_KEY);
+    } catch {
+      return false;
+    }
+  });
 
   const [currentChapter, setCurrentChapter] = useState(1);
   const [currentOffset, setCurrentOffset] = useState(0);
@@ -811,11 +820,26 @@ export function ReaderPage() {
 
   // --- Click anywhere to toggle chrome ------------------------------------
 
+  const dismissHint = useCallback(() => {
+    try {
+      localStorage.setItem(HINT_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+    setShowHint(false);
+  }, []);
+
   const onContentClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
     const el = scrollRef.current;
     if (!el) return;
     const target = e.target as HTMLElement;
     if (target.closest('button,a,input,select,textarea')) return;
+    // First tap dismisses the one-time hint instead of toggling chrome, so the
+    // gesture that clears it is the same gesture it's teaching.
+    if (showHint) {
+      dismissHint();
+      return;
+    }
     if (window.matchMedia('(max-width: 700px)').matches) {
       const rect = el.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -829,7 +853,7 @@ export function ReaderPage() {
       }
     }
     setShowChrome((v) => !v);
-  }, []);
+  }, [showHint, dismissHint]);
 
   const onChapterClick = useCallback(
     (idx: number) => {
@@ -1129,6 +1153,20 @@ export function ReaderPage() {
         )}
       </div>
 
+      {showHint && !loading && !error && (
+        <div className="reader__hint" onClick={dismissHint}>
+          <div className="reader__hint-card" onClick={(e) => e.stopPropagation()}>
+            <p>
+              点击页面<b>中部</b>，呼出 / 隐藏菜单
+            </p>
+            <p className="reader__hint-sub">移动端轻点屏幕<b>左右两侧</b>可翻页</p>
+            <button type="button" className="reader__hint-ok" onClick={dismissHint}>
+              知道了
+            </button>
+          </div>
+        </div>
+      )}
+
       {showChrome && (
         <footer className="reader__bottom">
           <button
@@ -1305,13 +1343,6 @@ export function ReaderPage() {
               </button>
             </header>
             <div className="settings">
-              <button
-                type="button"
-                className="settings__reset"
-                onClick={onResetSettings}
-              >
-                恢复默认设置
-              </button>
               <div className="settings__row">
                 <span className="settings__label">主题</span>
                 <div className="settings__themes">
@@ -1423,6 +1454,13 @@ export function ReaderPage() {
                   ))}
                 </div>
               </div>
+              <button
+                type="button"
+                className="settings__reset"
+                onClick={onResetSettings}
+              >
+                恢复默认设置
+              </button>
             </div>
           </aside>
         </div>

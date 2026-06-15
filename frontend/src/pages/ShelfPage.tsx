@@ -762,13 +762,42 @@ export function ShelfPage() {
       <section className="shelf__section">
         <h2 className="shelf__section-title">全部书籍</h2>
         {loading ? (
-          <p className="shelf__empty">加载中…</p>
+          <div className="shelf__empty">
+            <span className="shelf__spinner" aria-hidden="true" />
+            <p>加载中…</p>
+          </div>
         ) : filtered.length === 0 ? (
-          <p className="shelf__empty">
-            {books.length === 0
-              ? '书库为空。点击右上「扫描书库」抓取已授权目录里的 .txt / .epub / .pdf / .mobi / .azw3 文件。'
-              : '没有匹配的结果。'}
-          </p>
+          <div className="shelf__empty">
+            <svg
+              className="shelf__empty-icon"
+              width="46"
+              height="46"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M12 6.5C10.6 5.2 8.7 4.5 6.5 4.5H4V18h2.5c2.2 0 4.1.7 5.5 2 1.4-1.3 3.3-2 5.5-2H20V4.5h-2.5C15.3 4.5 13.4 5.2 12 6.5Z"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+              <path d="M12 6.5V20" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+            {books.length === 0 ? (
+              <>
+                <p>书库还是空的</p>
+                <p className="shelf__empty-sub">
+                  把 .txt / .epub / .pdf / .mobi / .azw3 放进已授权目录，点右上「扫描书库」即可导入。
+                </p>
+              </>
+            ) : (
+              <>
+                <p>没有匹配的结果</p>
+                <p className="shelf__empty-sub">换个关键词，或清除筛选条件再试试。</p>
+              </>
+            )}
+          </div>
         ) : view === 'grid' ? (
           <ul className="book-grid">
             {filtered.map((b) => {
