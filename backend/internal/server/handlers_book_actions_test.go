@@ -113,7 +113,7 @@ func TestBookSearchAndBookmarks(t *testing.T) {
 	}
 }
 
-func TestBookDTOIncludesSourcePath(t *testing.T) {
+func TestBookDTORedactsInternalPaths(t *testing.T) {
 	ctx := context.Background()
 	bookDir := t.TempDir()
 	st, err := store.Open(t.TempDir())
@@ -129,7 +129,6 @@ func TestBookDTOIncludesSourcePath(t *testing.T) {
 
 	uploadTestBook(t, srv, "BookA - AuthorX.txt", "Chapter 1\n\nBody paragraph.\n")
 	book := onlyBook(t, st, folder.ID)
-	wantSource := filepath.Join(bookDir, "BookA - AuthorX.txt")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID), nil)
 	rr := httptest.NewRecorder()
@@ -139,14 +138,21 @@ func TestBookDTOIncludesSourcePath(t *testing.T) {
 	}
 	var got struct {
 		Book struct {
+			Path       string `json:"path"`
 			SourcePath string `json:"source_path"`
 		} `json:"book"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode book: %v", err)
 	}
-	if got.Book.SourcePath != wantSource {
-		t.Fatalf("source_path = %q, want %q", got.Book.SourcePath, wantSource)
+	if got.Book.Path != "BookA.epub" {
+		t.Fatalf("path = %q, want cache basename", got.Book.Path)
+	}
+	if got.Book.SourcePath != "BookA - AuthorX.txt" {
+		t.Fatalf("source_path = %q, want source basename", got.Book.SourcePath)
+	}
+	if strings.Contains(got.Book.Path, bookDir) || strings.Contains(got.Book.SourcePath, bookDir) {
+		t.Fatalf("book DTO leaked internal path: %+v", got.Book)
 	}
 }
 

@@ -115,5 +115,5 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Logger.Printf("finish job %d: %v", job.ID, err)
 	}
 	done, _ := s.store.GetJob(r.Context(), job.ID)
-	writeJSON(w, http.StatusOK, map[string]any{"scans": results, "job": toJobDTO(done)})
+	writeJSON(w, http.StatusOK, map[string]any{"scans": publicScanResults(results), "job": toJobDTO(done)})
 }

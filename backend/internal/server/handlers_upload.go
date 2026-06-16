@@ -26,6 +26,11 @@ type uploadedFileDTO struct {
 	SizeBytes int64  `json:"size_bytes"`
 }
 
+type savedUpload struct {
+	dto  uploadedFileDTO
+	path string
+}
+
 func (s *Server) handleUploadBooks(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadRequestBytes)
 	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
@@ -59,8 +64,8 @@ func (s *Server) handleUploadBooks(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "save_upload", err)
 			return
 		}
-		uploaded = append(uploaded, u)
-		sourcePaths = append(sourcePaths, u.Path)
+		uploaded = append(uploaded, u.dto)
+		sourcePaths = append(sourcePaths, u.path)
 	}
 
 	payload := jobPayload{FolderID: folder.ID, SourcePaths: sourcePaths}
@@ -86,7 +91,7 @@ func (s *Server) handleUploadBooks(w http.ResponseWriter, r *http.Request) {
 	scan := results[0]
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"uploaded": uploaded,
-		"scan":     scan,
+		"scan":     publicScanResult(scan),
 		"job":      toJobDTO(done),
 	})
 }
@@ -126,40 +131,44 @@ func uploadFileHeaders(form *multipart.Form) []*multipart.FileHeader {
 	return out
 }
 
-func saveUploadedBook(folder string, fh *multipart.FileHeader) (uploadedFileDTO, error) {
+func saveUploadedBook(folder string, fh *multipart.FileHeader) (savedUpload, error) {
 	if err := os.MkdirAll(folder, 0o755); err != nil {
-		return uploadedFileDTO{}, fmt.Errorf("mkdir library folder: %w", err)
+		return savedUpload{}, fmt.Errorf("mkdir library folder: %w", err)
 	}
 	target, err := uniqueUploadPath(folder, fh.Filename)
 	if err != nil {
-		return uploadedFileDTO{}, err
+		return savedUpload{}, err
 	}
 
 	src, err := fh.Open()
 	if err != nil {
-		return uploadedFileDTO{}, fmt.Errorf("open upload: %w", err)
+		return savedUpload{}, fmt.Errorf("open upload: %w", err)
 	}
 	defer src.Close()
 
 	dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return uploadedFileDTO{}, fmt.Errorf("create target: %w", err)
+		return savedUpload{}, fmt.Errorf("create target: %w", err)
 	}
 	n, copyErr := io.Copy(dst, src)
 	closeErr := dst.Close()
 	if copyErr != nil {
 		_ = os.Remove(target)
-		return uploadedFileDTO{}, fmt.Errorf("copy upload: %w", copyErr)
+		return savedUpload{}, fmt.Errorf("copy upload: %w", copyErr)
 	}
 	if closeErr != nil {
 		_ = os.Remove(target)
-		return uploadedFileDTO{}, fmt.Errorf("close upload: %w", closeErr)
+		return savedUpload{}, fmt.Errorf("close upload: %w", closeErr)
 	}
 
-	return uploadedFileDTO{
-		Name:      filepath.Base(target),
-		Path:      target,
-		SizeBytes: n,
+	name := filepath.Base(target)
+	return savedUpload{
+		dto: uploadedFileDTO{
+			Name:      name,
+			Path:      name,
+			SizeBytes: n,
+		},
+		path: target,
 	}, nil
 }
 

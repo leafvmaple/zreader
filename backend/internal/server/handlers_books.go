@@ -45,7 +45,7 @@ type chapterDTO struct {
 
 func toBookDTO(b store.Book) bookDTO {
 	d := bookDTO{
-		ID: b.ID, FolderID: b.FolderID, Path: b.Path, Title: b.Title,
+		ID: b.ID, FolderID: b.FolderID, Path: publicBookPath(b), Title: b.Title,
 		Format: b.Format, SizeBytes: b.SizeBytes,
 		FileMtime: b.FileMtime, AddedAt: b.AddedAt, ScannedAt: b.ScannedAt,
 	}
@@ -67,7 +67,7 @@ func toBookDTO(b store.Book) bookDTO {
 		d.CoverLabel = b.CoverLabel.String
 	}
 	if b.SourcePath.Valid {
-		d.SourcePath = b.SourcePath.String
+		d.SourcePath = publicSourcePath(b.SourcePath.String)
 	}
 	if b.Encoding.Valid {
 		d.Encoding = b.Encoding.String

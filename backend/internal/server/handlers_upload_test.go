@@ -54,6 +54,9 @@ func TestHandleUploadBooks_SavesAndScans(t *testing.T) {
 	if len(res.Uploaded) != 1 || res.Uploaded[0].Name != "BookA - AuthorX.txt" {
 		t.Fatalf("uploaded = %+v", res.Uploaded)
 	}
+	if res.Uploaded[0].Path != "BookA - AuthorX.txt" || filepath.IsAbs(res.Uploaded[0].Path) {
+		t.Fatalf("uploaded path = %q, want public basename", res.Uploaded[0].Path)
+	}
 	if res.Scan.Added != 1 || len(res.Scan.Failed) != 0 {
 		t.Fatalf("scan = %+v", res.Scan)
 	}

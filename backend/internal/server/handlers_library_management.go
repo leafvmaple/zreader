@@ -40,6 +40,15 @@ type jobDTO struct {
 	FinishedAt int64    `json:"finished_at,omitempty"`
 }
 
+type scanResultDTO struct {
+	FolderID int64    `json:"folder_id"`
+	Path     string   `json:"path"`
+	Added    int      `json:"added"`
+	Updated  int      `json:"updated"`
+	Removed  int      `json:"removed"`
+	Failed   []string `json:"failed,omitempty"`
+}
+
 type jobPayload struct {
 	FolderID      int64    `json:"folder_id,omitempty"`
 	SourcePaths   []string `json:"source_paths,omitempty"`
@@ -75,6 +84,9 @@ func toJobDTO(j store.LibraryJob) jobDTO {
 	}
 	if j.Failed.Valid && j.Failed.String != "" {
 		_ = json.Unmarshal([]byte(j.Failed.String), &d.Failed)
+		for i, failed := range d.Failed {
+			d.Failed[i] = publicFailureLabel(failed)
+		}
 	}
 	if j.Error.Valid {
 		d.Error = j.Error.String
@@ -378,6 +390,9 @@ func (s *Server) runBatchJob(ctx context.Context, jobID int64, payload jobPayloa
 		result.Error = "unsupported batch action"
 	}
 	if len(failed) > 0 {
+		for i, item := range failed {
+			failed[i] = publicFailureLabel(item)
+		}
 		b, _ := json.Marshal(failed)
 		result.Failed = string(b)
 	}
@@ -458,7 +473,9 @@ func scanResultJobResult(results []library.ScanResult, failedErr error) store.Jo
 		out.Added += int64(res.Added)
 		out.Updated += int64(res.Updated)
 		out.Removed += int64(res.Removed)
-		failed = append(failed, res.Failed...)
+		for _, item := range res.Failed {
+			failed = append(failed, publicFailureLabel(item))
+		}
 	}
 	if len(failed) > 0 {
 		b, _ := json.Marshal(failed)

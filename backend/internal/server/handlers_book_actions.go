@@ -287,7 +287,7 @@ func (s *Server) handleReparseBook(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Logger.Printf("finish job %d: %v", job.ID, err)
 	}
 	done, _ := s.store.GetJob(r.Context(), job.ID)
-	writeJSON(w, http.StatusOK, map[string]any{"scan": res, "job": toJobDTO(done)})
+	writeJSON(w, http.StatusOK, map[string]any{"scan": publicScanResult(res), "job": toJobDTO(done)})
 }
 
 func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
