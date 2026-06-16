@@ -10,6 +10,9 @@ on:
 env:
   # Same repo name on both registries: leafvmaple/zreader
   IMAGE_NAME: ${{ github.repository }}
+  # Opt into the upcoming GitHub Actions Node 24 runtime now so releases do
+  # not carry the Node 20 deprecation warning.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   test:
