@@ -1,5 +1,5 @@
 # --- Stage 1: build the React SPA -------------------------------------------
-FROM node:22-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 WORKDIR /src/frontend
 
 # Install pnpm via the bundled corepack (pinned in package.json's engines if set).
@@ -15,7 +15,7 @@ COPY frontend/ ./
 RUN pnpm build
 
 # --- Stage 2: compile the Go backend with the embedded SPA ------------------
-FROM golang:1.25-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS backend
 WORKDIR /src/backend
 
 RUN apk add --no-cache git
