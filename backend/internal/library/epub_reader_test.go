@@ -263,3 +263,31 @@ func TestReadEpub_FlatTextMatchesInput(t *testing.T) {
 		t.Errorf("FlatText mismatch:\n got %q\nwant %q", gotTrim, wantTrim)
 	}
 }
+
+func TestGetFlatTextViewCachesDerivedViews(t *testing.T) {
+	text := "Chapter 1\n\nAlpha TARGET text.\n"
+	chapters := []Chapter{{Idx: 1, Title: "Chapter 1", Level: 0, ByteOffset: 0}}
+	p := writeEpubToTemp(t, "BookA", "AuthorX", text, chapters)
+
+	view, err := GetFlatTextView(p)
+	if err != nil {
+		t.Fatalf("GetFlatTextView: %v", err)
+	}
+	if !strings.Contains(view.Text, "TARGET") {
+		t.Fatalf("Text = %q, want flat text", view.Text)
+	}
+	if !strings.Contains(view.LowerText, "target") {
+		t.Fatalf("LowerText = %q, want lower-cased flat text", view.LowerText)
+	}
+	if got, want := string(view.Runes), view.Text; got != want {
+		t.Fatalf("Runes reconstruct %q, want %q", got, want)
+	}
+
+	again, err := GetFlatTextView(p)
+	if err != nil {
+		t.Fatalf("second GetFlatTextView: %v", err)
+	}
+	if again != view {
+		t.Fatalf("GetFlatTextView did not reuse cached view")
+	}
+}

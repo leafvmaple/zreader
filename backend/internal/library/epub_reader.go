@@ -425,7 +425,7 @@ func imageAltText(el xml.StartElement) string {
 type flatCacheEntry struct {
 	mtime int64
 	size  int64
-	runes []rune
+	view  *FlatTextView
 }
 
 var (
@@ -433,18 +433,25 @@ var (
 	flatCache   = map[string]flatCacheEntry{}
 )
 
-// GetFlatRunes returns the rune view of the EPUB at path — the flat
-// plain-text reconstruction the content API serves slices of. The
-// result is cached in-process keyed by absolute path; the entry is
-// considered stale and refreshed when mtime or byte size changes.
+// FlatTextView stores cached, derived views over the EPUB's flat text.
 //
-// The returned slice is shared with the cache; callers MUST treat it
-// as immutable (use string conversion to copy out subslices).
+// Text, LowerText, and Runes are shared with the cache; callers MUST treat
+// them as immutable.
+type FlatTextView struct {
+	Text      string
+	LowerText string
+	Runes     []rune
+}
+
+// GetFlatTextView returns the flat plain-text reconstruction of an EPUB plus
+// derived search/slicing views. The result is cached in-process keyed by
+// absolute path; the entry is considered stale and refreshed when mtime or
+// byte size changes.
 //
 // Cache is unbounded. For personal libraries (tens to low-hundreds of
 // books, each a few MB of plain text) this stays well under
 // hundred-megabyte budget. Add an LRU bound if that changes.
-func GetFlatRunes(epubPath string) ([]rune, error) {
+func GetFlatTextView(epubPath string) (*FlatTextView, error) {
 	info, err := os.Stat(epubPath)
 	if err != nil {
 		return nil, err
@@ -454,9 +461,9 @@ func GetFlatRunes(epubPath string) ([]rune, error) {
 
 	flatCacheMu.RLock()
 	if e, ok := flatCache[epubPath]; ok && e.mtime == mtime && e.size == size {
-		runes := e.runes
+		view := e.view
 		flatCacheMu.RUnlock()
-		return runes, nil
+		return view, nil
 	}
 	flatCacheMu.RUnlock()
 
@@ -464,12 +471,26 @@ func GetFlatRunes(epubPath string) ([]rune, error) {
 	if err != nil {
 		return nil, err
 	}
-	runes := []rune(book.FlatText)
+	view := &FlatTextView{
+		Text:      book.FlatText,
+		LowerText: strings.ToLower(book.FlatText),
+		Runes:     []rune(book.FlatText),
+	}
 
 	flatCacheMu.Lock()
-	flatCache[epubPath] = flatCacheEntry{mtime: mtime, size: size, runes: runes}
+	flatCache[epubPath] = flatCacheEntry{mtime: mtime, size: size, view: view}
 	flatCacheMu.Unlock()
-	return runes, nil
+	return view, nil
+}
+
+// GetFlatRunes returns the rune view of the EPUB at path — the flat plain-text
+// reconstruction the content API serves slices of.
+func GetFlatRunes(epubPath string) ([]rune, error) {
+	view, err := GetFlatTextView(epubPath)
+	if err != nil {
+		return nil, err
+	}
+	return view.Runes, nil
 }
 
 // collapseSpaces reduces runs of ASCII whitespace introduced by inline

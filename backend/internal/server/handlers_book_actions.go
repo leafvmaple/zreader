@@ -84,42 +84,39 @@ func (s *Server) handleSearchBook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "load_chapters", err)
 		return
 	}
-	runes, err := library.GetFlatRunes(book.Path)
+	view, err := library.GetFlatTextView(book.Path)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "read_epub", err)
 		return
 	}
-	text := string(runes)
-	matches := searchBookText(text, q, chapters, limit)
+	matches := searchBookText(view, q, chapters, limit)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"query":   q,
 		"matches": matches,
 	})
 }
 
-func searchBookText(text, query string, chapters []store.Chapter, limit int) []searchMatchDTO {
-	lowerText := strings.ToLower(text)
+func searchBookText(view *library.FlatTextView, query string, chapters []store.Chapter, limit int) []searchMatchDTO {
 	lowerQuery := strings.ToLower(query)
 	queryRunes := utf8.RuneCountInString(query)
 	if queryRunes == 0 {
 		return nil
 	}
-	allRunes := []rune(text)
 	matches := make([]searchMatchDTO, 0, limit)
 	byteCursor := 0
 	for len(matches) < limit {
-		i := strings.Index(lowerText[byteCursor:], lowerQuery)
+		i := strings.Index(view.LowerText[byteCursor:], lowerQuery)
 		if i < 0 {
 			break
 		}
 		byteStart := byteCursor + i
-		charStart := utf8.RuneCountInString(text[:byteStart])
+		charStart := utf8.RuneCountInString(view.Text[:byteStart])
 		matches = append(matches, searchMatchDTO{
 			CharOffset: int64(charStart),
 			ChapterIdx: chapterIdxAtCharOffset(int64(charStart), chapters),
-			Snippet:    searchSnippet(allRunes, charStart, queryRunes),
+			Snippet:    searchSnippet(view.Runes, charStart, queryRunes),
 		})
-		_, size := utf8.DecodeRuneInString(text[byteStart:])
+		_, size := utf8.DecodeRuneInString(view.Text[byteStart:])
 		if size <= 0 {
 			break
 		}
