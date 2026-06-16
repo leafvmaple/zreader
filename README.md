@@ -100,7 +100,8 @@ can write to it.
 - Chapter parsing: Chinese `第X章/节/回/卷`, English `Chapter N`, bracketed
   CJK numerals (`「一」`, `【3】`, `〈12〉`). Falls back to a single "正文"
   chapter when no markers are found.
-- Library scan: incremental — re-scanning skips files whose mtime+size match.
+- Library scan: re-runs format → ingest on each scan so parser/import fixes
+  apply as soon as the library is scanned again.
 - Reading view: per-chapter lazy load, chapter drawer, 4 themes × 4 font
   sizes, font picker (system / 思源宋体 / 霞鹜文楷), progress auto-sync
   with stale-write protection.

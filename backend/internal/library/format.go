@@ -202,8 +202,8 @@ func FormatToCache(folder, sourcePath string) (CacheResult, error) {
 }
 
 // FormatPDFToCache extracts a PDF text layer and feeds it through the same
-// text -> chapters -> EPUB pipeline as TXT sources. Image-only PDFs fail fast
-// with ErrPDFNoText; importing them needs OCR or a page-image reader mode.
+// text -> chapters -> EPUB pipeline as TXT sources. Image-only PDFs keep the
+// source file and use the source-backed page reader mode.
 func FormatPDFToCache(folder, sourcePath string) (CacheResult, error) {
 	st, err := os.Stat(sourcePath)
 	if err != nil {

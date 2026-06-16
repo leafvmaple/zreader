@@ -5,8 +5,8 @@ WORKDIR /src/frontend
 # Install pnpm via the bundled corepack (pinned in package.json's engines if set).
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
-COPY frontend/package.json ./
-RUN pnpm install --no-frozen-lockfile
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 
 # Vite writes its output to ../backend/internal/webui/dist (see vite.config.ts),
 # so make sure that destination directory exists in this stage.
@@ -60,7 +60,7 @@ ARG VERSION=docker
 ARG BUILD_DATE
 ARG VCS_REF
 LABEL org.opencontainers.image.title="zreader" \
-      org.opencontainers.image.description="Self-hosted TXT reader: scans a directory of plain-text books, splits chapters automatically (CJK + bracketed-numeral support), and serves a React SPA for browsing and reading with per-device progress sync." \
+      org.opencontainers.image.description="Self-hosted ebook reader for TXT, EPUB, PDF, MOBI, and AZW-family sources, with automatic formatting, chapter parsing, and web reading progress sync." \
       org.opencontainers.image.url="https://github.com/leafvmaple/zreader" \
       org.opencontainers.image.source="https://github.com/leafvmaple/zreader" \
       org.opencontainers.image.documentation="https://github.com/leafvmaple/zreader/blob/main/README.md" \

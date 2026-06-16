@@ -22,9 +22,9 @@ services:
     volumes:
       # Persistent metadata: SQLite db + scan state.
       - ./data:/data
-      # Your books. Point this at wherever your TXT files live.
+      # Your books. Point this at wherever your ebook files live.
       # Writable so the scanner can write the formatted cache under
-      # ./books/<author>/<title>.txt — see AGENTS.md "Pipeline: scan →
+      # ./books/<author>/<title>.epub — see AGENTS.md "Pipeline: scan →
       # format → parse". Source TXTs at the top level are never modified.
       # `:ro` would block both the cache and the legacy `.bak` migration,
       # so leave it writable in the common case.
