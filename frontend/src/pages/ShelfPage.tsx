@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
 import { BookCover } from '../components/BookCover';
+import { Dialog } from '../components/Dialog';
 import type { Book, DuplicateGroup, Folder, LibraryJob, Progress, ReadingStatus, Tag } from '../types/api';
 import './ShelfPage.css';
 
@@ -10,6 +11,9 @@ type BookAction = 'reparse' | 'delete';
 type StatusFilter = 'all' | 'favorite' | ReadingStatus;
 type ThemeMode = 'light' | 'dark';
 type ViewMode = 'list' | 'grid';
+// What the delete dialog is currently confirming: one book (named in the
+// prompt) or the current multi-select.
+type DeleteTarget = { kind: 'one'; book: Book } | { kind: 'many'; ids: number[] } | null;
 
 const THEME_KEY = 'zreader.theme';
 const VIEW_KEY = 'zreader.view';
@@ -120,6 +124,20 @@ function MoreIcon() {
   );
 }
 
+function StarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 3.6l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"
+        fill={filled ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function SortIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -140,10 +158,12 @@ function SortIcon() {
 function Menu({
   label,
   badge,
+  className,
   children,
 }: {
   label: string;
   badge?: number;
+  className?: string;
   children: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -170,7 +190,7 @@ function Menu({
     <div className="shelf__menu" ref={ref}>
       <button
         type="button"
-        className={`shelf__btn shelf__btn--icon shelf__btn--ghost${open ? ' is-open' : ''}`}
+        className={`shelf__btn shelf__btn--icon shelf__btn--ghost${className ? ` ${className}` : ''}${open ? ' is-open' : ''}`}
         onClick={() => setOpen((v) => !v)}
         aria-label={label}
         aria-haspopup="menu"
@@ -244,6 +264,18 @@ export function ShelfPage() {
   const [uploadFolderId, setUploadFolderId] = useState<number | undefined>(undefined);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [bookBusy, setBookBusy] = useState<Record<number, BookAction>>({});
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [deleteSource, setDeleteSource] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState<string | null>(null);
+
+  // Every entry point resets the source checkbox: an opt-in that
+  // remembered its last value would be an opt-in in name only.
+  const askDelete = useCallback((target: DeleteTarget) => {
+    setDeleteSource(false);
+    setDeleteMsg(null);
+    setDeleteTarget(target);
+  }, []);
   const [selected, setSelected] = useState<number[]>([]);
   const [batchTag, setBatchTag] = useState('');
   const [showJobs, setShowJobs] = useState(false);
@@ -413,42 +445,40 @@ export function ShelfPage() {
     [refresh],
   );
 
-  const onDeleteBook = useCallback(
-    async (book: Book) => {
-      const confirmed = window.confirm(`确定删除《${book.title}》吗？这会同时删除源文件和书库记录。`);
-      if (!confirmed) return;
-      setBookBusy((prev) => ({ ...prev, [book.id]: 'delete' }));
-      setScanMsg(null);
-      try {
-        await api.deleteBook(book.id, true);
-        setScanMsg('已删除书籍和源文件');
-        await refresh();
-      } catch (err) {
-        if (err instanceof api.ApiError && err.code === 'source_not_found') {
-          const deleteRecordOnly = window.confirm('源文件没有找到。是否只删除阅读器里的记录和缓存？');
-          if (deleteRecordOnly) {
-            try {
-              await api.deleteBook(book.id, false);
-              setScanMsg('已删除书籍记录和缓存');
-              await refresh();
-              return;
-            } catch (fallbackErr) {
-              setScanMsg(`删除失败：${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
-              return;
-            }
-          }
-        }
-        setScanMsg(`删除失败：${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        setBookBusy((prev) => {
-          const next = { ...prev };
-          delete next[book.id];
-          return next;
-        });
+  // Deleting used to run api.deleteBook(id, true) behind a window.confirm
+  // — i.e. the easiest button on every row erased the user's actual file,
+  // while the harder-to-reach batch delete only dropped the record. The
+  // defaults are now the other way round: record-only unless you tick the
+  // box, and the box is in a real dialog that names what it will remove.
+  const onConfirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    const ids = deleteTarget.kind === 'one' ? [deleteTarget.book.id] : deleteTarget.ids;
+    setDeleteBusy(true);
+    setScanMsg(null);
+    try {
+      if (deleteTarget.kind === 'one') {
+        await api.deleteBook(ids[0], deleteSource);
+      } else {
+        await api.batchBooks({ action: 'delete', book_ids: ids, delete_source: deleteSource });
+        setSelected([]);
       }
-    },
-    [refresh],
-  );
+      setScanMsg(
+        deleteSource
+          ? `已删除 ${ids.length} 本书的记录和源文件`
+          : `已删除 ${ids.length} 本书的记录和缓存（源文件保留）`,
+      );
+      setDeleteTarget(null);
+      await refresh();
+    } catch (err) {
+      if (err instanceof api.ApiError && err.code === 'source_not_found') {
+        setDeleteMsg('源文件没有找到。取消勾选「同时删除源文件」可以只删除阅读器里的记录。');
+      } else {
+        setDeleteMsg(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteSource, deleteTarget, refresh]);
 
   const openEdit = useCallback((book: Book) => {
     setEditBook(book);
@@ -547,14 +577,6 @@ export function ShelfPage() {
     );
   }, [runBatch, selected]);
 
-  const onBatchDelete = useCallback(async () => {
-    const confirmed = window.confirm(`确定删除选中的 ${selected.length} 本书吗？默认只删除阅读器记录和缓存。`);
-    if (!confirmed) return;
-    await runBatch('批量删除', () =>
-      api.batchBooks({ action: 'delete', book_ids: selected, delete_source: false }),
-    );
-  }, [runBatch, selected]);
-
   const onRetryJob = useCallback(
     async (job: LibraryJob) => {
       setScanBusy(true);
@@ -624,46 +646,66 @@ export function ShelfPage() {
 
   // --- Render --------------------------------------------------------------
 
-  // Per-book management actions, shared by the list rows and the grid cards.
-  const bookActionButtons = (b: Book, action: BookAction | undefined) => (
-    <>
-      <button
-        type="button"
-        className="book-row__action"
-        onClick={() => openEdit(b)}
-        disabled={action !== undefined}
-        title="编辑元数据"
-      >
-        编辑
-      </button>
-      <button
-        type="button"
-        className="book-row__action"
-        onClick={() => void api.patchBook(b.id, { favorite: !b.favorite }).then(refresh)}
-        disabled={action !== undefined}
-        title={b.favorite ? '取消收藏' : '收藏'}
-      >
-        {b.favorite ? '取消★' : '收藏'}
-      </button>
-      <button
-        type="button"
-        className="book-row__action"
-        onClick={() => void onReparseBook(b)}
-        disabled={action !== undefined}
-        title="重新解析这本书"
-      >
-        {action === 'reparse' ? '解析中…' : '重解析'}
-      </button>
-      <button
-        type="button"
-        className="book-row__action book-row__action--danger"
-        onClick={() => void onDeleteBook(b)}
-        disabled={action !== undefined}
-        title="删除这本书"
-      >
-        {action === 'delete' ? '删除中…' : '删除'}
-      </button>
-    </>
+  // Per-book management actions, shared by the list rows and the grid
+  // cards. These used to be four same-weight bordered buttons rendered on
+  // every row — including 删除 — which out-shouted the book itself and put
+  // the destructive action one stray click away. They live in an overflow
+  // menu now; the star stays direct because favouriting is the one action
+  // people do often.
+  const bookActionMenu = (b: Book, action: BookAction | undefined) => (
+    <Menu label={`《${b.title}》的操作`} className="book-row__more">
+      {(close) => (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              openEdit(b);
+              close();
+            }}
+          >
+            编辑信息
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={action !== undefined}
+            onClick={() => {
+              void onReparseBook(b);
+              close();
+            }}
+          >
+            {action === 'reparse' ? '解析中…' : '重新解析'}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="shelf__menu-item--danger"
+            disabled={action !== undefined}
+            onClick={() => {
+              askDelete({ kind: 'one', book: b });
+              close();
+            }}
+          >
+            删除…
+          </button>
+        </>
+      )}
+    </Menu>
+  );
+
+  const favButton = (b: Book, action: BookAction | undefined, className: string) => (
+    <button
+      type="button"
+      className={`${className}${b.favorite ? ' is-active' : ''}`}
+      onClick={() => void api.patchBook(b.id, { favorite: !b.favorite }).then(refresh)}
+      disabled={action !== undefined}
+      aria-label={b.favorite ? '取消收藏' : '收藏'}
+      aria-pressed={b.favorite}
+      title={b.favorite ? '取消收藏' : '收藏'}
+    >
+      <StarIcon filled={b.favorite} />
+    </button>
   );
 
   return (
@@ -868,7 +910,7 @@ export function ShelfPage() {
           <button type="button" onClick={() => void onBatchStatus('finished')} disabled={scanBusy}>标为已读</button>
           <button type="button" onClick={() => void onBatchFavorite()} disabled={scanBusy}>收藏</button>
           <button type="button" onClick={() => void onBatchReparse()} disabled={scanBusy}>重解析</button>
-          <button type="button" className="batch-bar__danger" onClick={() => void onBatchDelete()} disabled={scanBusy}>删除记录</button>
+          <button type="button" className="batch-bar__danger" onClick={() => askDelete({ kind: 'many', ids: selected })} disabled={scanBusy}>删除…</button>
           <button type="button" onClick={clearSelected}>取消</button>
         </section>
       )}
@@ -954,16 +996,6 @@ export function ShelfPage() {
                       onChange={() => toggleSelected(b.id)}
                     />
                   </label>
-                  <button
-                    type="button"
-                    className={`book-card__fav${b.favorite ? ' is-active' : ''}`}
-                    onClick={() => void api.patchBook(b.id, { favorite: !b.favorite }).then(refresh)}
-                    disabled={action !== undefined}
-                    aria-label={b.favorite ? '取消收藏' : '收藏'}
-                    title={b.favorite ? '取消收藏' : '收藏'}
-                  >
-                    ★
-                  </button>
                   <Link to={`/read/${b.id}`} className="book-card__link">
                     <BookCover book={b} className="book-card__cover" />
                   </Link>
@@ -983,7 +1015,10 @@ export function ShelfPage() {
                       </div>
                       <span className="book-card__pct">{pct}%</span>
                     </div>
-                    <div className="book-card__actions">{bookActionButtons(b, action)}</div>
+                  </div>
+                  <div className="book-card__tools">
+                    {favButton(b, action, 'book-row__fav-btn')}
+                    {bookActionMenu(b, action)}
                   </div>
                 </li>
               );
@@ -1008,10 +1043,7 @@ export function ShelfPage() {
                   <Link to={`/read/${b.id}`} className="book-row__link">
                     <BookCover book={b} className="book-row__cover" />
                     <div className="book-row__main">
-                      <div className="book-row__title">
-                        {b.favorite && <span className="book-row__fav">★</span>}
-                        {b.title}
-                      </div>
+                      <div className="book-row__title">{b.title}</div>
                       <div className="book-row__meta">
                         <span
                           className={`book-row__status book-row__status--${b.reading_status}`}
@@ -1033,14 +1065,17 @@ export function ShelfPage() {
                       )}
                     </div>
                     <div className="book-row__progress">
-                      <div className="book-row__pct">{pct}%</div>
                       <div className="book-row__bar">
                         <div className="book-row__bar-fill" style={{ width: `${pct}%` }} />
                       </div>
+                      <div className="book-row__pct">{pct}%</div>
                     </div>
                     <div className="book-row__cta">{pct > 0 ? '继续阅读' : '开始阅读'}</div>
                   </Link>
-                  <div className="book-row__actions">{bookActionButtons(b, action)}</div>
+                  <div className="book-row__actions">
+                    {favButton(b, action, 'book-row__fav-btn')}
+                    {bookActionMenu(b, action)}
+                  </div>
                 </li>
               );
             })}
@@ -1049,61 +1084,12 @@ export function ShelfPage() {
       </section>
 
       {uploadOpen && (
-        <div className="upload-dialog" role="dialog" aria-modal="true" aria-label="添加书籍">
-          <div className="upload-dialog__panel">
-            <header className="upload-dialog__header">
-              <h2>添加书籍</h2>
-              <button
-                type="button"
-                className="upload-dialog__close"
-                onClick={() => setUploadOpen(false)}
-                disabled={uploadBusy}
-                aria-label="关闭"
-              >
-                ×
-              </button>
-            </header>
-
-            {folders.length > 1 && (
-              <label className="upload-dialog__field">
-                <span>书库</span>
-                <select
-                  value={uploadFolderId ?? ''}
-                  onChange={(e) => setUploadFolderId(Number(e.target.value))}
-                  disabled={uploadBusy}
-                >
-                  {folders.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.path}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-
-            <label className="upload-dialog__drop">
-              <input
-                type="file"
-                multiple
-                accept=".txt,.epub,.pdf,.mobi,.azw,.azw3,text/plain,application/epub+zip,application/pdf"
-                disabled={uploadBusy}
-                onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
-              />
-              <span>{uploadFiles.length > 0 ? `${uploadFiles.length} 个文件` : '选择文件'}</span>
-            </label>
-
-            {uploadFiles.length > 0 && (
-              <ul className="upload-dialog__files">
-                {uploadFiles.map((file) => (
-                  <li key={`${file.name}-${file.size}`}>{file.name}</li>
-                ))}
-              </ul>
-            )}
-
-            {folders.length === 0 && <div className="upload-dialog__error">没有可用书库目录</div>}
-            {uploadMsg && <div className="upload-dialog__error">{uploadMsg}</div>}
-
-            <footer className="upload-dialog__actions">
+        <Dialog
+          title="添加书籍"
+          onClose={() => setUploadOpen(false)}
+          busy={uploadBusy}
+          footer={
+            <>
               <button type="button" className="shelf__btn" onClick={() => setUploadOpen(false)} disabled={uploadBusy}>
                 取消
               </button>
@@ -1115,36 +1101,82 @@ export function ShelfPage() {
               >
                 {uploadBusy ? '添加中…' : '添加'}
               </button>
-            </footer>
-          </div>
-        </div>
+            </>
+          }
+        >
+          {folders.length > 1 && (
+            <label className="field">
+              <span>书库</span>
+              <select
+                value={uploadFolderId ?? ''}
+                onChange={(e) => setUploadFolderId(Number(e.target.value))}
+                disabled={uploadBusy}
+              >
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.path}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label className="upload-drop">
+            <input
+              type="file"
+              multiple
+              accept=".txt,.epub,.pdf,.mobi,.azw,.azw3,text/plain,application/epub+zip,application/pdf"
+              disabled={uploadBusy}
+              onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
+            />
+            <span>{uploadFiles.length > 0 ? `已选 ${uploadFiles.length} 个文件` : '点击选择文件'}</span>
+            <small>支持 .txt / .epub / .pdf / .mobi / .azw3</small>
+          </label>
+
+          {uploadFiles.length > 0 && (
+            <ul className="upload-files">
+              {uploadFiles.map((file) => (
+                <li key={`${file.name}-${file.size}`}>{file.name}</li>
+              ))}
+            </ul>
+          )}
+
+          {folders.length === 0 && <div className="form-error">没有可用书库目录</div>}
+          {uploadMsg && <div className="form-error">{uploadMsg}</div>}
+        </Dialog>
       )}
 
       {editBook && (
-        <div className="upload-dialog" role="dialog" aria-modal="true" aria-label="编辑书籍">
-          <div className="upload-dialog__panel edit-dialog">
-            <header className="upload-dialog__header">
-              <h2>编辑书籍</h2>
+        <Dialog
+          title="编辑书籍"
+          onClose={() => setEditBook(null)}
+          busy={editBusy}
+          footer={
+            <>
+              <button type="button" className="shelf__btn" onClick={() => setEditBook(null)} disabled={editBusy}>
+                取消
+              </button>
               <button
                 type="button"
-                className="upload-dialog__close"
-                onClick={() => setEditBook(null)}
-                disabled={editBusy}
-                aria-label="关闭"
+                className="shelf__btn shelf__btn--primary"
+                onClick={() => void onSaveEdit()}
+                disabled={editBusy || editForm.title.trim() === ''}
               >
-                ×
+                {editBusy ? '保存中…' : '保存'}
               </button>
-            </header>
-
-            <label className="upload-dialog__field">
-              <span>书名</span>
-              <input
-                value={editForm.title}
-                onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
-                disabled={editBusy}
-              />
-            </label>
-            <label className="upload-dialog__field">
+            </>
+          }
+        >
+          <label className="field">
+            <span>书名</span>
+            <input
+              value={editForm.title}
+              onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+              disabled={editBusy}
+            />
+          </label>
+          <div className="field-row">
+            <label className="field">
               <span>作者</span>
               <input
                 value={editForm.author}
@@ -1152,7 +1184,7 @@ export function ShelfPage() {
                 disabled={editBusy}
               />
             </label>
-            <label className="upload-dialog__field">
+            <label className="field">
               <span>分类</span>
               <input
                 value={editForm.category}
@@ -1160,15 +1192,18 @@ export function ShelfPage() {
                 disabled={editBusy}
               />
             </label>
-            <label className="upload-dialog__field">
-              <span>标签</span>
-              <input
-                value={editForm.tags}
-                onChange={(e) => setEditForm((f) => ({ ...f, tags: e.target.value }))}
-                disabled={editBusy}
-              />
-            </label>
-            <label className="upload-dialog__field">
+          </div>
+          <label className="field">
+            <span>标签</span>
+            <input
+              value={editForm.tags}
+              onChange={(e) => setEditForm((f) => ({ ...f, tags: e.target.value }))}
+              placeholder="用空格或逗号分隔"
+              disabled={editBusy}
+            />
+          </label>
+          <div className="field-row">
+            <label className="field">
               <span>阅读状态</span>
               <select
                 value={editForm.reading_status}
@@ -1181,42 +1216,83 @@ export function ShelfPage() {
                 <option value="paused">搁置</option>
               </select>
             </label>
-            <label className="edit-dialog__check">
+            <label className="field field--check">
+              <span>收藏</span>
               <input
                 type="checkbox"
                 checked={editForm.favorite}
                 onChange={(e) => setEditForm((f) => ({ ...f, favorite: e.target.checked }))}
                 disabled={editBusy}
               />
-              <span>收藏</span>
             </label>
-            <label className="upload-dialog__field">
-              <span>简介</span>
-              <textarea
-                value={editForm.description}
-                onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
-                disabled={editBusy}
-              />
-            </label>
+          </div>
+          <label className="field">
+            <span>简介</span>
+            <textarea
+              value={editForm.description}
+              onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+              disabled={editBusy}
+            />
+          </label>
 
-            {editMsg && <div className="upload-dialog__error">{editMsg}</div>}
+          {editMsg && <div className="form-error">{editMsg}</div>}
+        </Dialog>
+      )}
 
-            <footer className="upload-dialog__actions">
-              <button type="button" className="shelf__btn" onClick={() => setEditBook(null)} disabled={editBusy}>
+      {deleteTarget && (
+        <Dialog
+          title="删除书籍"
+          compact
+          onClose={() => setDeleteTarget(null)}
+          busy={deleteBusy}
+          footer={
+            <>
+              <button type="button" className="shelf__btn" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>
                 取消
               </button>
               <button
                 type="button"
-                className="shelf__btn shelf__btn--primary"
-                onClick={() => void onSaveEdit()}
-                disabled={editBusy || editForm.title.trim() === ''}
+                className="shelf__btn shelf__btn--danger"
+                onClick={() => void onConfirmDelete()}
+                disabled={deleteBusy}
               >
-                {editBusy ? '保存中…' : '保存'}
+                {deleteBusy ? '删除中…' : '删除'}
               </button>
-            </footer>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p className="confirm-text">
+            {deleteTarget.kind === 'one' ? (
+              <>
+                确定删除《<b>{deleteTarget.book.title}</b>》吗？
+              </>
+            ) : (
+              <>
+                确定删除选中的 <b>{deleteTarget.ids.length}</b> 本书吗？
+              </>
+            )}
+          </p>
+          <label className="confirm-check">
+            <input
+              type="checkbox"
+              checked={deleteSource}
+              onChange={(e) => setDeleteSource(e.target.checked)}
+              disabled={deleteBusy}
+            />
+            <span>
+              同时删除源文件
+              <small>
+                {deleteSource
+                  ? '磁盘上的原始文件会被一并删除，无法恢复。'
+                  : '只清除阅读器里的记录和缓存，磁盘上的原始文件保留。'}
+              </small>
+            </span>
+          </label>
+
+          {deleteMsg && <div className="form-error">{deleteMsg}</div>}
+        </Dialog>
       )}
+
     </main>
   );
 }
