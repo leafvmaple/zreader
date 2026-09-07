@@ -138,28 +138,45 @@ export type ExportRules = {
   notes: boolean;
 };
 
-export type ExportChunk = {
-  book: string;
-  author?: string;
-  chapter: number;
+export type ExportRecord = {
+  schema_version: number;
+  id: string;
+  document_id: string;
+  chapter_id: string;
+  chapter_index: number;
   title: string;
+  text: string;
+  metadata: {
+    book: string;
+    author?: string;
+  };
+  cleaning: {
+    promo: boolean;
+    edge_lines: boolean;
+    normalise: boolean;
+    author_notes: boolean;
+    warnings?: string[];
+  };
   offset: number;
   chars: number;
-  text: string;
+  source_sha256: string;
+  cleaned_sha256: string;
 };
 
 export type ExportStats = {
   chapters: number;
-  chunks: number;
+  records: number;
   chars_in: number;
   chars_out: number;
   dropped_paragraphs: number;
   rewritten_paragraphs: number;
+  replacement_characters: number;
+  chapter_structure_warning: boolean;
 };
 
 export type ExportPreview = {
   stats: ExportStats;
-  sample: ExportChunk[];
+  sample: ExportRecord[];
   rules_warning?: string;
 };
 

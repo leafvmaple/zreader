@@ -1,11 +1,12 @@
-// Package export turns a book into cleaned, chunked records suitable for
-// feeding to a language model or a vector store.
+// Package export turns a book into cleaned corpus records suitable for
+// language-model training, evaluation, or indexing.
 //
 // The source is the same flat text the reader serves slices of, so what
 // you export is exactly what you read — no second parse of the original
 // file. On top of that it removes the debris that pirate-site TXT rips
 // carry (promo lines, repeated per-chapter headers, author notes), then
-// cuts the result into chunks at paragraph boundaries.
+// preserves chapter boundaries in the corpus format. The older chunked
+// builder remains available for callers that need embedding-sized records.
 //
 // Rules are data, not code. The defaults below cover the common shapes;
 // `<data>/clean-rules.json` extends them without a rebuild (see
@@ -14,13 +15,15 @@
 // so there is no plugin interface to implement.
 //
 // Offsets in the output index the book's own char-offset space, the same
-// coordinates /content and /progress use. A chunk can therefore be traced
+// coordinates /content and /progress use. A record can therefore be traced
 // straight back to a position in the reader.
 
 package export
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -73,15 +76,57 @@ type Chunk struct {
 	Text   string `json:"text"`
 }
 
+// CorpusSchemaVersion identifies the chapter-oriented JSONL contract.
+const CorpusSchemaVersion = 1
+
+// CorpusMetadata carries source identity without mixing it into training
+// text. Optional provenance fields can be added in a later schema version.
+type CorpusMetadata struct {
+	Book   string `json:"book"`
+	Author string `json:"author,omitempty"`
+}
+
+// CleaningReport records the exact pass selection and machine-readable
+// warnings so a later training run can be reproduced or filtered.
+type CleaningReport struct {
+	Promo       bool     `json:"promo"`
+	EdgeLines   bool     `json:"edge_lines"`
+	Normalise   bool     `json:"normalise"`
+	AuthorNotes bool     `json:"author_notes"`
+	Warnings    []string `json:"warnings,omitempty"`
+}
+
+// CorpusRecord is one complete cleaned chapter. IDs are deterministic from
+// the source text and chapter index; hashes distinguish source identity from
+// the cleaned representation produced by the selected rules.
+type CorpusRecord struct {
+	SchemaVersion int            `json:"schema_version"`
+	ID            string         `json:"id"`
+	DocumentID    string         `json:"document_id"`
+	ChapterID     string         `json:"chapter_id"`
+	ChapterIndex  int            `json:"chapter_index"`
+	Title         string         `json:"title"`
+	Text          string         `json:"text"`
+	Metadata      CorpusMetadata `json:"metadata"`
+	Cleaning      CleaningReport `json:"cleaning"`
+	Offset        int            `json:"offset"`
+	Chars         int            `json:"chars"`
+	SourceSHA256  string         `json:"source_sha256"`
+	CleanedSHA256 string         `json:"cleaned_sha256"`
+}
+
 // Stats reports what the run did, so the UI can say how much was removed
 // rather than making the user diff two files to find out.
 type Stats struct {
-	Chapters       int `json:"chapters"`
-	Chunks         int `json:"chunks"`
-	CharsIn        int `json:"chars_in"`
-	CharsOut       int `json:"chars_out"`
-	DroppedParas   int `json:"dropped_paragraphs"`
-	RewrittenParas int `json:"rewritten_paragraphs"`
+	Chapters                int  `json:"chapters"`
+	Chunks                  int  `json:"chunks,omitempty"`
+	Records                 int  `json:"records"`
+	CharsIn                 int  `json:"chars_in"`
+	CharsOut                int  `json:"chars_out"`
+	DroppedParas            int  `json:"dropped_paragraphs"`
+	RewrittenParas          int  `json:"rewritten_paragraphs"`
+	ReplacementCharacters   int  `json:"replacement_characters"`
+	ChapterStructureWarning bool `json:"chapter_structure_warning"`
 }
 
 // Meta is the book identity stamped onto every chunk. Records are
@@ -118,44 +163,149 @@ func Build(meta Meta, chapters []Chapter, flat string, opts Options, rs *RuleSet
 		rs = DefaultRules()
 	}
 
-	paras := splitParagraphs(flat, chapters)
+	titles := chapterTitles(chapters)
+	paras, stats := cleanParagraphs(splitParagraphs(flat, chapters), chapters, titles, opts.Rules, rs)
+	chunks := chunkParagraphs(meta, paras, titles, opts.ChunkChars)
+	stats.Chunks = len(chunks)
+	return chunks, stats
+}
+
+// BuildCorpus runs the same cleaning pipeline as Build but emits one complete
+// record per chapter. It deliberately does not accept a target size: splitting
+// for a particular model belongs in the downstream training pipeline.
+func BuildCorpus(meta Meta, chapters []Chapter, flat string, rules Rules, rs *RuleSet) ([]CorpusRecord, Stats) {
+	if rs == nil {
+		rs = DefaultRules()
+	}
+
+	titles := chapterTitles(chapters)
+	sourceParas := splitParagraphs(flat, chapters)
+	cleanedParas, stats := cleanParagraphs(sourceParas, chapters, titles, rules, rs)
+	stats.ReplacementCharacters = strings.Count(flat, "\uFFFD")
+	stats.ChapterStructureWarning = hasGenericChapterStructure(chapters)
+
+	sourceByChapter := sourceTextByChapter(flat, chapters)
+	cleanedByChapter := paragraphsByChapter(cleanedParas)
+	documentID := "sha256:" + hashText(flat)
+	records := make([]CorpusRecord, 0, len(chapters))
+	for _, chapter := range chapters {
+		cleaned := cleanedByChapter[chapter.Idx]
+		if len(cleaned) == 0 {
+			continue
+		}
+		text := joinParagraphs(cleaned)
+		sourceText := sourceByChapter[chapter.Idx]
+		chapterID := fmt.Sprintf("chapter-%04d", chapter.Idx)
+		report := CleaningReport{
+			Promo:       rules.Promo,
+			EdgeLines:   rules.EdgeLines,
+			Normalise:   rules.Normalise,
+			AuthorNotes: rules.AuthorNotes,
+		}
+		if strings.ContainsRune(sourceText, '\uFFFD') {
+			report.Warnings = []string{"replacement_character"}
+		}
+		records = append(records, CorpusRecord{
+			SchemaVersion: CorpusSchemaVersion,
+			ID:            documentID + "/" + chapterID,
+			DocumentID:    documentID,
+			ChapterID:     chapterID,
+			ChapterIndex:  chapter.Idx,
+			Title:         chapter.Title,
+			Text:          text,
+			Metadata:      CorpusMetadata{Book: meta.Title, Author: meta.Author},
+			Cleaning:      report,
+			Offset:        cleaned[0].offset,
+			Chars:         len([]rune(text)),
+			SourceSHA256:  hashText(sourceText),
+			CleanedSHA256: hashText(text),
+		})
+	}
+	stats.Records = len(records)
+	return records, stats
+}
+
+func cleanParagraphs(paras []para, chapters []Chapter, titles map[int]string, rules Rules, rs *RuleSet) ([]para, Stats) {
 	stats := Stats{Chapters: len(chapters)}
 	for _, p := range paras {
 		stats.CharsIn += len([]rune(p.text))
 	}
 
-	titles := make(map[int]string, len(chapters))
-	for _, c := range chapters {
-		titles[c.Idx] = c.Title
-	}
-
 	// Chapter titles are carried in the record's Title field, so the copy
 	// sitting as the chapter's first paragraph is duplication in the text.
 	paras = dropChapterTitleParas(paras, titles, &stats)
-
-	if opts.Rules.EdgeLines {
+	if rules.EdgeLines {
 		paras = dropRepeatedEdgeLines(paras, &stats)
 	}
-	if opts.Rules.AuthorNotes {
+	if rules.AuthorNotes {
 		paras = dropAuthorNotes(paras, rs, &stats)
 	}
-	if opts.Rules.Promo {
+	if rules.Promo {
 		paras = dropPromo(paras, rs, &stats)
 	}
-	if opts.Rules.Normalise {
+	if rules.Normalise {
 		paras = normaliseParas(paras, rs, &stats)
 	}
 
-	// Count surviving paragraph text, NOT the joined chunk text: chunks
-	// carry blank-line separators between paragraphs, and including those
-	// made CharsOut exceed CharsIn on a run with every rule disabled — a
-	// "-3% removed" readout in the UI.
+	// Separators inserted between paragraphs are not source characters.
 	for _, p := range paras {
 		stats.CharsOut += len([]rune(p.text))
 	}
-	chunks := chunkParagraphs(meta, paras, titles, opts.ChunkChars)
-	stats.Chunks = len(chunks)
-	return chunks, stats
+	return paras, stats
+}
+
+func chapterTitles(chapters []Chapter) map[int]string {
+	titles := make(map[int]string, len(chapters))
+	for _, chapter := range chapters {
+		titles[chapter.Idx] = chapter.Title
+	}
+	return titles
+}
+
+func paragraphsByChapter(paras []para) map[int][]para {
+	out := make(map[int][]para)
+	for _, p := range paras {
+		out[p.chapter] = append(out[p.chapter], p)
+	}
+	return out
+}
+
+func sourceTextByChapter(flat string, chapters []Chapter) map[int]string {
+	runes := []rune(flat)
+	out := make(map[int]string, len(chapters))
+	for i, chapter := range chapters {
+		end := len(runes)
+		if i+1 < len(chapters) {
+			end = chapters[i+1].CharOffset
+		}
+		out[chapter.Idx] = string(runes[chapter.CharOffset:end])
+	}
+	return out
+}
+
+func joinParagraphs(paras []para) string {
+	parts := make([]string, 0, len(paras))
+	for _, p := range paras {
+		parts = append(parts, p.text)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func hashText(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return fmt.Sprintf("%x", sum)
+}
+
+func hasGenericChapterStructure(chapters []Chapter) bool {
+	if len(chapters) != 1 {
+		return false
+	}
+	switch strings.TrimSpace(chapters[0].Title) {
+	case "正文", "全文", "未分章":
+		return true
+	default:
+		return false
+	}
 }
 
 // WriteJSONL writes one compact JSON object per line. json.Encoder already
@@ -169,6 +319,32 @@ func WriteJSONL(w io.Writer, chunks []Chunk) error {
 		}
 	}
 	return nil
+}
+
+// WriteCorpusJSONL validates every record before writing so corruption can
+// never leave behind a plausible-looking but truncated partial export.
+func WriteCorpusJSONL(w io.Writer, records []CorpusRecord) error {
+	for _, record := range records {
+		if corpusRecordHasReplacementCharacter(record) {
+			return errors.New("corpus contains Unicode replacement characters")
+		}
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	for _, record := range records {
+		if err := enc.Encode(record); err != nil {
+			return fmt.Errorf("encode corpus record: %w", err)
+		}
+	}
+	return nil
+}
+
+func corpusRecordHasReplacementCharacter(record CorpusRecord) bool {
+	return strings.ContainsRune(record.Title, '\uFFFD') ||
+		strings.ContainsRune(record.Text, '\uFFFD') ||
+		strings.ContainsRune(record.Metadata.Book, '\uFFFD') ||
+		strings.ContainsRune(record.Metadata.Author, '\uFFFD')
 }
 
 // --- Paragraph splitting ---------------------------------------------------

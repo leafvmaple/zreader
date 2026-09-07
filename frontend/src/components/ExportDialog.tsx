@@ -9,7 +9,7 @@ import './ExportDialog.css';
 // The preview is the point: cleaning rules delete text, and a rule that
 // looks reasonable in the abstract can eat a paragraph you wanted. Every
 // toggle re-runs the export server-side and reports what it removed plus
-// the first chunks verbatim, so the decision is made against the real
+// the first chapters verbatim, so the decision is made against the real
 // output rather than a description of it.
 
 const RULE_LABELS: { key: keyof ExportRules; label: string; hint: string }[] = [
@@ -19,25 +19,22 @@ const RULE_LABELS: { key: keyof ExportRules; label: string; hint: string }[] = [
   { key: 'notes', label: '作者的话 / 章末感言', hint: '「作者有话说」「求推荐票」及其之后的段落' },
 ];
 
-const CHUNK_PRESETS = [1000, 2000, 4000];
-
 const DEFAULT_RULES: ExportRules = { promo: true, edges: true, normalise: true, notes: true };
 
 export function ExportDialog({ book, onClose }: { book: Book; onClose: () => void }) {
   const [rules, setRules] = useState<ExportRules>(DEFAULT_RULES);
-  const [chunkChars, setChunkChars] = useState(2000);
   const [preview, setPreview] = useState<ExportPreview | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Re-preview on every change. Debounced because dragging the chunk-size
-  // slider would otherwise re-clean the whole book per pixel.
+  // Re-preview after each rule change so destructive passes are visible
+  // before the user commits to a download.
   useEffect(() => {
     let cancelled = false;
     setBusy(true);
     const timer = setTimeout(() => {
       api
-        .previewExport(book.id, rules, chunkChars)
+        .previewExport(book.id, rules)
         .then((p) => {
           if (cancelled) return;
           setPreview(p);
@@ -56,7 +53,7 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [book.id, rules, chunkChars]);
+  }, [book.id, rules]);
 
   const toggle = useCallback((key: keyof ExportRules) => {
     setRules((r) => ({ ...r, [key]: !r[key] }));
@@ -65,6 +62,7 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
   const stats = preview?.stats;
   const removed = stats ? stats.chars_in - stats.chars_out : 0;
   const removedPct = stats && stats.chars_in > 0 ? Math.round((removed / stats.chars_in) * 1000) / 10 : 0;
+  const canDownload = Boolean(preview && stats?.replacement_characters === 0);
 
   return (
     <Dialog
@@ -76,10 +74,10 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
             取消
           </button>
           <a
-            className={`shelf__btn shelf__btn--primary${preview ? '' : ' is-disabled'}`}
-            href={api.exportURL(book.id, rules, chunkChars)}
+            className={`shelf__btn shelf__btn--primary${canDownload ? '' : ' is-disabled'}`}
+            href={canDownload ? api.exportURL(book.id, rules) : undefined}
             download={`${book.title}.jsonl`}
-            aria-disabled={!preview}
+            aria-disabled={!canDownload}
           >
             下载 JSONL
           </a>
@@ -87,7 +85,7 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
       }
     >
       <p className="export__intro">
-        把《{book.title}》按段落切成 JSONL 分块，每行一条记录，带书名、章节和原文偏移量。
+        把《{book.title}》导出为训练语料 JSONL，每章一条记录，附带稳定 ID、清洗配置和校验哈希。
       </p>
 
       <div className="export__section">
@@ -105,31 +103,25 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
         </div>
       </div>
 
-      <div className="export__section">
-        <span className="export__label">每块大小</span>
-        <div className="export__chunks">
-          {CHUNK_PRESETS.map((n) => (
-            <button
-              key={n}
-              type="button"
-              className={chunkChars === n ? 'is-active' : ''}
-              onClick={() => setChunkChars(n)}
-            >
-              {n.toLocaleString()} 字
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div className={`export__result${busy ? ' is-busy' : ''}`}>
         {error && <div className="form-error">预览失败：{error}</div>}
         {preview?.rules_warning && <div className="form-error">{preview.rules_warning}</div>}
         {stats && (
           <>
+            {stats.replacement_characters > 0 && (
+              <div className="form-error">
+                检测到 {stats.replacement_characters.toLocaleString()} 个乱码替代字符（�）。请修复或重新导入源文件后再下载。
+              </div>
+            )}
+            {stats.chapter_structure_warning && (
+              <p className="export__notice">
+                当前只识别到一个通用“正文”章节。请先确认目录解析是否正确；导出仍会保留完整正文。
+              </p>
+            )}
             <div className="export__stats">
               <div>
-                <b>{stats.chunks.toLocaleString()}</b>
-                <span>分块</span>
+                <b>{stats.records.toLocaleString()}</b>
+                <span>章节记录</span>
               </div>
               <div>
                 <b>{stats.chars_out.toLocaleString()}</b>
@@ -146,7 +138,7 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
             </div>
             {preview.sample.length > 0 && (
               <>
-                <span className="export__label">前 {preview.sample.length} 块预览</span>
+                <span className="export__label">前 {preview.sample.length} 章预览</span>
                 <pre className="export__sample">
                   {preview.sample
                     .map((c) => JSON.stringify({ ...c, text: c.text }, null, 0))

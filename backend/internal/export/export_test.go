@@ -313,3 +313,107 @@ func TestWriteJSONL_OneObjectPerLine(t *testing.T) {
 		t.Errorf("output escaped non-ASCII:\n%s", buf.String())
 	}
 }
+
+func TestBuildCorpus_EmitsOneVersionedRecordPerChapter(t *testing.T) {
+	flat, chapters := buildFixture(t,
+		[]string{"第一章　子丑寅卯", "甲乙丙丁，戊己庚辛。", "壬癸子丑，寅卯辰巳。"},
+		[]string{"第二章　辰巳午未", "午未申酉，戌亥天干。"},
+	)
+	records, stats := BuildCorpus(
+		Meta{Title: "示例书", Author: "佚名"},
+		chapters,
+		flat,
+		allRules().Rules,
+		nil,
+	)
+
+	if len(records) != 2 {
+		t.Fatalf("got %d records, want one per chapter", len(records))
+	}
+	if stats.Records != len(records) || stats.Chapters != len(chapters) {
+		t.Fatalf("stats = %+v, want 2 records and 2 chapters", stats)
+	}
+	if records[0].SchemaVersion != CorpusSchemaVersion {
+		t.Errorf("schema version = %d, want %d", records[0].SchemaVersion, CorpusSchemaVersion)
+	}
+	if records[0].DocumentID == "" || records[0].ID != records[0].DocumentID+"/chapter-0001" {
+		t.Errorf("unstable record identity: %+v", records[0])
+	}
+	if records[0].DocumentID != records[1].DocumentID {
+		t.Error("records from one document have different document IDs")
+	}
+	if records[0].ChapterID != "chapter-0001" || records[0].ChapterIndex != 1 {
+		t.Errorf("chapter identity = %q/%d", records[0].ChapterID, records[0].ChapterIndex)
+	}
+	if records[0].Metadata.Book != "示例书" || records[0].Metadata.Author != "佚名" {
+		t.Errorf("metadata = %+v", records[0].Metadata)
+	}
+	if records[0].Text != "甲乙丙丁，戊己庚辛。\n\n壬癸子丑，寅卯辰巳。" {
+		t.Errorf("chapter text was not kept whole: %q", records[0].Text)
+	}
+	if len(records[0].SourceSHA256) != 64 || len(records[0].CleanedSHA256) != 64 {
+		t.Errorf("hashes are not SHA-256 hex: %+v", records[0])
+	}
+	if records[0].Chars != len([]rune(records[0].Text)) {
+		t.Errorf("Chars=%d disagrees with text length", records[0].Chars)
+	}
+	var buf bytes.Buffer
+	if err := WriteCorpusJSONL(&buf, records); err != nil {
+		t.Fatalf("WriteCorpusJSONL: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != len(chapters) {
+		t.Fatalf("JSONL has %d lines, want %d", len(lines), len(chapters))
+	}
+	if strings.Contains(buf.String(), `\u`) {
+		t.Errorf("corpus output escaped non-ASCII:\n%s", buf.String())
+	}
+}
+
+func TestBuildCorpus_CleaningChangesOnlyCleanedHash(t *testing.T) {
+	flat, chapters := buildFixture(t,
+		[]string{"第一章　子丑寅卯", "甲乙丙丁。。。戊己庚辛。"},
+	)
+	cleaned, _ := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, Rules{Normalise: true}, nil)
+	raw, _ := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, Rules{}, nil)
+
+	if cleaned[0].ID != raw[0].ID || cleaned[0].DocumentID != raw[0].DocumentID ||
+		cleaned[0].SourceSHA256 != raw[0].SourceSHA256 {
+		t.Error("source identity changed when only cleaning rules changed")
+	}
+	if cleaned[0].CleanedSHA256 == raw[0].CleanedSHA256 {
+		t.Error("cleaned hash did not change with the cleaned text")
+	}
+}
+
+func TestBuildCorpus_ReportsReplacementCharacterAndGenericStructure(t *testing.T) {
+	flat, chapters := buildFixture(t,
+		[]string{"正文", "甲乙丙丁。\uFFFD"},
+	)
+	records, stats := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, Rules{}, nil)
+
+	if stats.ReplacementCharacters != 1 {
+		t.Errorf("replacement characters = %d, want 1", stats.ReplacementCharacters)
+	}
+	if !stats.ChapterStructureWarning {
+		t.Error("single generic chapter did not raise a structure warning")
+	}
+	if len(records) != 1 || len(records[0].Cleaning.Warnings) != 1 ||
+		records[0].Cleaning.Warnings[0] != "replacement_character" {
+		t.Errorf("record warnings = %+v", records)
+	}
+}
+
+func TestWriteCorpusJSONL_RejectsReplacementCharacterBeforeWriting(t *testing.T) {
+	records := []CorpusRecord{
+		{SchemaVersion: CorpusSchemaVersion, Text: "甲乙丙丁。"},
+		{SchemaVersion: CorpusSchemaVersion, Text: "戊己\uFFFD庚辛。"},
+	}
+	var buf bytes.Buffer
+	if err := WriteCorpusJSONL(&buf, records); err == nil {
+		t.Fatal("WriteCorpusJSONL accepted a replacement character")
+	}
+	if buf.Len() != 0 {
+		t.Errorf("writer emitted a partial export before validation: %q", buf.String())
+	}
+}

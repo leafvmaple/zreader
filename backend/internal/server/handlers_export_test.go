@@ -1,10 +1,94 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"mime"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/leafvmaple/zreader/internal/export"
+	"github.com/leafvmaple/zreader/internal/store"
 )
+
+func exportTestBook(t *testing.T, content string) (*Server, store.Book) {
+	t.Helper()
+	ctx := context.Background()
+	bookDir := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	srv := New(Config{Port: 0, Store: st, DataDir: t.TempDir()})
+	uploadTestBook(t, srv, "Example - Anonymous.txt", content)
+	return srv, onlyBook(t, st, folder.ID)
+}
+
+func TestExportBookUsesChapterCorpusContract(t *testing.T) {
+	srv, book := exportTestBook(t, "第一章 子丑寅卯\n\n甲乙丙丁，戊己庚辛。\n\n第二章 辰巳午未\n\n壬癸子丑，寅卯辰巳。\n")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/export?preview=1&chunk=200", nil)
+	rr := httptest.NewRecorder()
+	testRouter(t, srv).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("preview status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var preview struct {
+		Stats  export.Stats          `json:"stats"`
+		Sample []export.CorpusRecord `json:"sample"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if preview.Stats.Records != 2 || len(preview.Sample) != 2 {
+		t.Fatalf("preview = %+v, want one record for each of 2 chapters", preview)
+	}
+	for i, record := range preview.Sample {
+		if record.SchemaVersion != export.CorpusSchemaVersion {
+			t.Errorf("record %d schema version = %d", i, record.SchemaVersion)
+		}
+		if record.DocumentID == "" || record.SourceSHA256 == "" || record.CleanedSHA256 == "" {
+			t.Errorf("record %d is missing provenance: %+v", i, record)
+		}
+	}
+}
+
+func TestExportBookBlocksReplacementCharactersBeforeDownload(t *testing.T) {
+	srv, book := exportTestBook(t, "\uFEFF正文\n\n甲乙丙丁。\uFFFD\n")
+
+	previewReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/export?preview=1", nil)
+	previewRecorder := httptest.NewRecorder()
+	testRouter(t, srv).ServeHTTP(previewRecorder, previewReq)
+	if previewRecorder.Code != http.StatusOK {
+		t.Fatalf("preview status = %d body=%s", previewRecorder.Code, previewRecorder.Body.String())
+	}
+	var preview struct {
+		Stats export.Stats `json:"stats"`
+	}
+	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if preview.Stats.ReplacementCharacters != 1 {
+		t.Fatalf("replacement characters = %d, want 1", preview.Stats.ReplacementCharacters)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/export", nil)
+	downloadRecorder := httptest.NewRecorder()
+	testRouter(t, srv).ServeHTTP(downloadRecorder, downloadReq)
+	if downloadRecorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("download status = %d body=%s", downloadRecorder.Code, downloadRecorder.Body.String())
+	}
+	if strings.Contains(downloadRecorder.Body.String(), `"schema_version"`) {
+		t.Fatalf("download returned corpus data before rejecting corruption: %s", downloadRecorder.Body.String())
+	}
+}
 
 // A CJK book title has to survive the Content-Disposition round trip: the
 // bare `filename` is ASCII-only by spec, so the real name rides in

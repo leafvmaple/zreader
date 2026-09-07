@@ -2,11 +2,11 @@ package server
 
 // Cleaned export.
 //
-// GET /api/v1/books/{id}/export streams the book as JSONL chunks with the
+// GET /api/v1/books/{id}/export streams the book as chapter-oriented JSONL
 // pirate-rip debris removed — see internal/export for the passes and for
 // why the rules are data rather than a plugin interface.
 //
-// ?preview=1 returns just the statistics plus the first few chunks, so the
+// ?preview=1 returns just the statistics plus the first few chapters, so the
 // UI can show what a given rule combination would actually remove before
 // the user commits to a download.
 
@@ -23,14 +23,10 @@ import (
 	"github.com/leafvmaple/zreader/internal/library"
 )
 
-// previewChunks is how many records the preview returns — enough to judge
+// previewRecords is how many records the preview returns — enough to judge
 // the cleaning by eye without shipping the book through the JSON encoder
 // twice.
-const previewChunks = 3
-
-// maxChunkChars bounds the request so a hand-edited URL can't ask for a
-// single chunk holding an entire novel.
-const maxChunkChars = 20000
+const previewRecords = 3
 
 func (s *Server) handleExportBook(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -79,21 +75,18 @@ func (s *Server) handleExportBook(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Logger.Printf("export: %v (using built-in rules)", ruleErr)
 	}
 
-	opts := export.Options{
-		Rules:      parseRules(r),
-		ChunkChars: clampInt(intParam(r, "chunk", export.DefaultChunkChars), 200, maxChunkChars),
-	}
+	rulesSelection := parseRules(r)
 	meta := export.Meta{Title: book.Title}
 	if book.Author.Valid {
 		meta.Author = book.Author.String
 	}
 
-	chunks, stats := export.Build(meta, chapters, view.Text, opts, rules)
+	records, stats := export.BuildCorpus(meta, chapters, view.Text, rulesSelection, rules)
 
 	if r.URL.Query().Get("preview") != "" {
-		head := chunks
-		if len(head) > previewChunks {
-			head = head[:previewChunks]
+		head := records
+		if len(head) > previewRecords {
+			head = head[:previewRecords]
 		}
 		out := map[string]any{"stats": stats, "sample": head}
 		if ruleErr != nil {
@@ -102,11 +95,16 @@ func (s *Server) handleExportBook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
+	if stats.ReplacementCharacters > 0 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_text_encoding",
+			errors.New("source contains Unicode replacement characters; repair or re-import it before exporting"))
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", contentDisposition(book.Title+".jsonl"))
-	if err := export.WriteJSONL(w, chunks); err != nil {
+	if err := export.WriteCorpusJSONL(w, records); err != nil {
 		// Headers are already out; the truncated body is the only signal
 		// available, so just record it.
 		s.cfg.Logger.Printf("export book %d: %v", book.ID, err)
@@ -130,28 +128,6 @@ func boolParam(r *http.Request, name string, fallback bool) bool {
 		return fallback
 	}
 	return v != "0" && !strings.EqualFold(v, "false")
-}
-
-func intParam(r *http.Request, name string, fallback int) int {
-	v := r.URL.Query().Get(name)
-	if v == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return fallback
-	}
-	return n
-}
-
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }
 
 // contentDisposition builds a header that survives a CJK filename.
