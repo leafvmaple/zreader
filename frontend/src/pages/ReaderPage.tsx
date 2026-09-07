@@ -324,8 +324,19 @@ function TOCList({
   onJump: (idx: number) => void;
 }): React.ReactNode {
   const tree = buildTOCTree(chapters);
+  const listRef = useRef<HTMLUListElement | null>(null);
+
+  // Open the TOC where the reader actually is. Without this a 200-chapter
+  // book always opened at chapter 1 and you had to hunt for the highlight.
+  // Runs once per mount — the drawer unmounts on close, so reopening
+  // re-centres on the chapter you moved to.
+  useLayoutEffect(() => {
+    const active = listRef.current?.querySelector('.toc__node--active');
+    active?.scrollIntoView({ block: 'center' });
+  }, []);
+
   return (
-    <ul className="toc">
+    <ul className="toc" ref={listRef}>
       {tree.map((n) => (
         <TOCNodeItem
           key={n.chapter.idx}
@@ -415,6 +426,11 @@ export function ReaderPage() {
   const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMsg, setSearchMsg] = useState<string | null>(null);
+  // Percentage being dragged on the footer progress bar, or null when
+  // not scrubbing. Kept separate from `pct` so the bar tracks the finger
+  // immediately while the (async, chapter-loading) jump only fires on
+  // release.
+  const [scrub, setScrub] = useState<number | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Set after the initial scroll-to-saved-position fires, so the scroll
@@ -499,8 +515,10 @@ export function ReaderPage() {
         if (progress && progress.char_offset > 0) {
           pendingScrollRef.current = progress.char_offset;
           setCurrentOffset(progress.char_offset);
+          if (total > 0) setPct(Math.round((progress.char_offset / total) * 100));
         } else {
           setCurrentOffset(0);
+          setPct(0);
           initialised.current = true;
         }
 
@@ -963,6 +981,27 @@ export function ReaderPage() {
     [jumpToOffset],
   );
 
+  // The footer bar showed progress but could not be used to move — the
+  // one place in the reader where the obvious gesture did nothing. It is
+  // a range input rather than a div with pointer handlers so that
+  // keyboard and assistive tech get seeking for free.
+  const scrubChapterTitle = useCallback(
+    (percent: number) => {
+      const total = book?.char_count ?? 0;
+      if (total === 0 || chapters.length === 0) return '';
+      const offset = Math.round((percent / 100) * total);
+      return chapters.find((c) => c.idx === chapterIdxAtOffset(offset, chapters))?.title ?? '';
+    },
+    [book, chapters],
+  );
+
+  const commitScrub = useCallback(() => {
+    if (scrub === null) return;
+    const total = book?.char_count ?? 0;
+    setScrub(null);
+    if (total > 0) void jumpToOffset(Math.round((scrub / 100) * total));
+  }, [book, jumpToOffset, scrub]);
+
   const onResetSettings = useCallback(() => {
     try {
       localStorage.removeItem(SETTINGS_KEY);
@@ -1225,8 +1264,32 @@ export function ReaderPage() {
           >
             <IconBookmark />
           </button>
-          <div className="reader__progress-track">
-            <div className="reader__progress-fill" style={{ width: `${pct}%` }} />
+          <div className="reader__scrub" onClick={(e) => e.stopPropagation()}>
+            {scrub !== null && (
+              <div className="reader__scrub-tip" style={{ '--p': `${scrub}%` } as React.CSSProperties}>
+                <b>{scrub}%</b>
+                <span>{scrubChapterTitle(scrub)}</span>
+              </div>
+            )}
+            <div className="reader__progress-track">
+              <div
+                className="reader__progress-fill"
+                style={{ width: `${scrub ?? pct}%`, transition: scrub !== null ? 'none' : undefined }}
+              />
+            </div>
+            <input
+              type="range"
+              className="reader__scrub-input"
+              min={0}
+              max={100}
+              value={scrub ?? pct}
+              aria-label="阅读进度"
+              onChange={(e) => setScrub(Number(e.target.value))}
+              onPointerUp={commitScrub}
+              onPointerCancel={commitScrub}
+              onKeyUp={commitScrub}
+              onBlur={commitScrub}
+            />
           </div>
           <button
             className="reader__icon-btn"

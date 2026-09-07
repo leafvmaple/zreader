@@ -61,30 +61,57 @@ export function useThrottledProgress({ bookId, intervalMs = 5000, onConflict }: 
     [flush, intervalMs],
   );
 
-  // Flush on unmount so navigating away saves the latest position promptly.
+  // flushBeacon is the terminal write: a keepalive fetch that the browser
+  // is obliged to deliver even as the page goes away. We can't await it,
+  // so it does not touch lastUpdatedAt — a conflict here would have
+  // nowhere to be reported anyway.
+  const flushBeacon = useCallback(() => {
+    const pos = pending.current;
+    if (!pos) return;
+    pending.current = null;
+    if (timer.current != null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    fetch(`/api/v1/progress/${bookId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...pos, updated_at: Math.floor(Date.now() / 1000) }),
+      keepalive: true,
+    }).catch(() => {
+      /* nothing to do — best effort */
+    });
+  }, [bookId]);
+
+  // Save whenever the page stops being watched, not only on unmount.
+  //
+  // React's unmount cleanup covers navigating inside the app, but it does
+  // NOT run when a tab is closed, when a phone is locked, or when the user
+  // switches apps — which is how most reading sessions actually end. With
+  // only the 5s throttle behind it, that lost up to five seconds of
+  // position every time, on the one feature the app exists to sync.
+  //
+  // visibilitychange → hidden is the event that reliably fires in all of
+  // those cases; pagehide covers the bfcache path Safari takes on
+  // navigation away.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flushBeacon();
+    };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', flushBeacon);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', flushBeacon);
+    };
+  }, [flushBeacon]);
+
+  // Flush on unmount so navigating away inside the app saves promptly.
   useEffect(() => {
     return () => {
-      if (timer.current != null) {
-        clearTimeout(timer.current);
-        timer.current = null;
-      }
-      // Best-effort sync flush — fetch keepalive lets the request survive
-      // the page tear-down. We can't await it here, but the keepalive flag
-      // tells the browser to deliver it anyway.
-      const pos = pending.current;
-      if (pos) {
-        const now = Math.floor(Date.now() / 1000);
-        fetch(`/api/v1/progress/${bookId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...pos, updated_at: now }),
-          keepalive: true,
-        }).catch(() => {
-          /* nothing to do — best effort */
-        });
-      }
+      flushBeacon();
     };
-  }, [bookId]);
+  }, [flushBeacon]);
 
   return { report, flush };
 }

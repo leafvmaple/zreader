@@ -202,8 +202,19 @@
   white-space: nowrap;
 }
 
-.reader__progress-track {
+/* Scrubber: a real range input laid transparently over the drawn track,
+ * so pointer, keyboard and assistive tech all drive the same control
+ * while the visuals stay ours. */
+.reader__scrub {
+  position: relative;
   flex: 1;
+  display: flex;
+  align-items: center;
+  height: 28px;
+}
+
+.reader__progress-track {
+  width: 100%;
   height: 4px;
   background: var(--r-overlay-strong);
   border-radius: 2px;
@@ -214,6 +225,64 @@
   height: 100%;
   background: var(--r-accent);
   transition: width 200ms ease;
+}
+
+.reader__scrub-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+/* Widen the invisible thumb so a finger can grab the bar anywhere near
+ * it rather than only on the 4px track. */
+.reader__scrub-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 28px;
+  height: 28px;
+}
+
+.reader__scrub-input::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border: 0;
+}
+
+/* Where you'd land, shown while dragging — seeking blind to a percentage
+ * is not much use in a book. */
+.reader__scrub-tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: clamp(90px, var(--p), calc(100% - 90px));
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  max-width: 220px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  background: var(--r-fg);
+  color: var(--r-bg);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.reader__scrub-tip b { font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.reader__scrub-tip span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.78;
 }
 
 /* --- Scrollable content -------------------------------------------------- */
