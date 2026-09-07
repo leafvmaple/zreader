@@ -43,6 +43,10 @@
   display: flex;
   flex-direction: column;
   gap: 0.16em;
+  /* Lines are pre-chunked in splitTitle, so any wrapping here would be
+   * the browser second-guessing that split and producing ragged
+   * one-glyph lines. */
+  white-space: nowrap;
   font-size: 15cqw;
   font-weight: 600;
   line-height: 1.26;

@@ -15,6 +15,8 @@ import './BookCover.css';
 // `book.has_cover` gates the network request: a library with no EPUBs
 // issues no image requests at all rather than one 404 per book.
 
+const CJK_PER_LINE = 5;
+
 type Props = {
   book: Book;
   /** Extra class for size/placement; the cover always fills its box. */
@@ -23,17 +25,22 @@ type Props = {
 
 // splitTitle breaks a title into display lines. CJK titles have no
 // spaces to wrap on and `word-break: break-all` would hyphenate mid
-// word for the Latin ones, so we chunk explicitly: CJK every 6
+// word for the Latin ones, so we chunk explicitly: CJK every 5
 // characters, Latin on word boundaries. Four lines max — anything
 // longer is a filename, not a title, and gets an ellipsis.
+//
+// CJK_PER_LINE is tied to the type size in BookCover.css: 5 glyphs at
+// 15cqw is 75cqw, inside the 80cqw the padding leaves. Raising it
+// without lowering the font size makes each line overflow and wrap
+// again, which is what the explicit chunking exists to prevent.
 function splitTitle(title: string): string[] {
   const clean = title.trim();
   if (!clean) return [];
   const isCJK = /[㐀-鿿豈-﫿]/.test(clean);
   const lines: string[] = [];
   if (isCJK) {
-    for (let i = 0; i < clean.length && lines.length < 4; i += 6) {
-      lines.push(clean.slice(i, i + 6));
+    for (let i = 0; i < clean.length && lines.length < 4; i += CJK_PER_LINE) {
+      lines.push(clean.slice(i, i + CJK_PER_LINE));
     }
   } else {
     let line = '';
@@ -48,7 +55,7 @@ function splitTitle(title: string): string[] {
     }
     if (line && lines.length < 4) lines.push(line);
   }
-  if (lines.length === 4 && clean.length > (isCJK ? 24 : 48)) {
+  if (lines.length === 4 && clean.length > (isCJK ? CJK_PER_LINE * 4 : 48)) {
     lines[3] = lines[3].slice(0, -1) + '…';
   }
   return lines;
