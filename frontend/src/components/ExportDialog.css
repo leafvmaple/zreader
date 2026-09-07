@@ -1,0 +1,129 @@
+.export__intro {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.export__section { margin-bottom: 16px; }
+
+.export__label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.export__rules {
+  display: grid;
+  gap: 6px;
+}
+
+.export__rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+
+.export__rule.is-on {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+.export__rule input { margin-top: 2px; flex: none; cursor: pointer; }
+.export__rule span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.export__rule small { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+
+.export__chunks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.export__chunks button {
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.export__chunks button:hover { background: var(--hover); }
+
+.export__chunks button.is-active {
+  background: var(--selected);
+  color: var(--selected-fg);
+  border-color: transparent;
+}
+
+/* Dim rather than blank while re-previewing: the numbers shifting under a
+ * spinner is more disorienting than stale numbers going pale for 200ms. */
+.export__result { transition: opacity 120ms ease; }
+.export__result.is-busy { opacity: 0.45; }
+
+.export__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.export__stats div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.export__stats b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.export__stats span { font-size: 11px; color: var(--text-muted); }
+
+.export__sample {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-muted);
+}
+
+.export__hint {
+  margin: 14px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.shelf__btn--primary.is-disabled {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* The download control is an <a>, so it needs the button's box explicitly. */
+a.shelf__btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}

@@ -102,9 +102,14 @@ can write to it.
   chapter when no markers are found.
 - Library scan: re-runs format → ingest on each scan so parser/import fixes
   apply as soon as the library is scanned again.
-- Reading view: per-chapter lazy load, chapter drawer, 4 themes × 4 font
-  sizes, font picker (system / 思源宋体 / 霞鹜文楷), progress auto-sync
-  with stale-write protection.
+- Cover art: EPUB (and converted MOBI/AZW) covers are extracted at scan time
+  and served from the library; everything else gets a generated cover.
+- Reading view: per-chapter lazy load, chapter drawer that opens on your
+  current chapter, a draggable progress bar, 6 themes × 4 font sizes,
+  progress auto-sync with stale-write protection.
+- Fonts: three system stacks out of the box, no network calls. Extra
+  webfonts are opt-in — see [Reading fonts](#reading-fonts).
+- Cleaned export for LLM/RAG use — see [Export for AI](#export-for-ai).
 - Keyboard: ←/→/PageUp/PageDown/Space turn pages, Home/End jump, Esc closes.
 
 ## What's missing
@@ -116,6 +121,75 @@ can write to it.
   in this mode.
 - Image-only/scanned PDFs are readable as pages, but not OCR-searchable yet.
 - MOBI/AZW/AZW3 import requires an external converter; there is no native parser.
+
+### Export for AI
+
+Any text-backed book can be exported as JSONL through the shelf's per-book
+`⋯` menu, or directly:
+
+```bash
+curl -OJ 'http://localhost:8080/api/v1/books/12/export?chunk=2000'
+```
+
+One JSON object per line, cut on paragraph boundaries and never spanning
+two chapters:
+
+```json
+{"book":"BookA","author":"AuthorX","chapter":3,"title":"第三章 起","offset":8412,"chars":1873,"text":"…"}
+```
+
+`offset` is a rune offset into the book's own text — the same coordinate the
+reader and the progress API use — so a chunk can be traced back to a reading
+position.
+
+Four cleaning passes run by default, each switchable via a query parameter
+(`promo`, `edges`, `normalise`, `notes`; `0` disables):
+
+| Pass        | Removes                                                              |
+| ----------- | -------------------------------------------------------------------- |
+| `promo`     | Pirate-site advertising injected into the prose (URLs, 「记住本站」…) |
+| `edges`     | Per-chapter headers/footers, detected by cross-chapter repetition     |
+| `normalise` | Indentation, runs of spaces, `。。。`→`……`, half-width punctuation    |
+| `notes`     | 「作者有话说」/「求推荐票」blocks and the rest of the chapter after them |
+
+Add `preview=1` to get statistics plus the first few chunks instead of a
+download — the UI uses this to show what a rule combination would strip
+before you commit to it.
+
+#### Extending the cleaning rules
+
+The built-in patterns are conservative on purpose: a false positive deletes
+a line of your book. To add your own, drop a `clean-rules.json` in
+`ZREADER_DATA_DIR` — the patterns are appended to the built-ins, so you
+never lose the defaults by adding to them:
+
+```json
+{
+  "promo":        ["^本站永久域名"],
+  "author_notes": ["^本章说"],
+  "replace":      [["俩", "两"]]
+}
+```
+
+`promo` and `author_notes` are Go regexes; `replace` is literal
+search-and-replace applied during normalisation. A malformed file is
+reported in the preview response and ignored — the defaults still run.
+
+### Reading fonts
+
+The three built-in choices (宋体 / 黑体 / 楷体) resolve entirely from fonts
+the device already has, so the reader makes no external requests. Bundling
+CJK webfonts isn't practical — a subsetted 霞鹜文楷 alone is around 19 MB
+against a ~23 MB image — so extra fonts are opt-in: put `.woff2` / `.ttf`
+files in `<ZREADER_DATA_DIR>/fonts/` and they appear in the reader's font
+picker, served from your own host.
+
+```bash
+mkdir -p ./data/fonts
+cp LXGWWenKaiScreen.ttf ./data/fonts/霞鹜文楷.ttf
+```
+
+The filename (without extension) is the label shown in the picker.
 
 ### Manual chapter sidecars
 

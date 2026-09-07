@@ -106,6 +106,38 @@ export type LibraryJob = {
   finished_at?: number;
 };
 
+export type ExportRules = {
+  promo: boolean;
+  edges: boolean;
+  normalise: boolean;
+  notes: boolean;
+};
+
+export type ExportChunk = {
+  book: string;
+  author?: string;
+  chapter: number;
+  title: string;
+  offset: number;
+  chars: number;
+  text: string;
+};
+
+export type ExportStats = {
+  chapters: number;
+  chunks: number;
+  chars_in: number;
+  chars_out: number;
+  dropped_paragraphs: number;
+  rewritten_paragraphs: number;
+};
+
+export type ExportPreview = {
+  stats: ExportStats;
+  sample: ExportChunk[];
+  rules_warning?: string;
+};
+
 /** A woff2/ttf the user dropped into <data>/fonts, offered in the reader. */
 export type ReadingFont = {
   file: string;

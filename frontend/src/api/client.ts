@@ -15,6 +15,8 @@ import type {
   ScanResult,
   SearchMatch,
   Tag,
+  ExportPreview,
+  ExportRules,
   ReadingFont,
   UploadResult,
 } from '../types/api';
@@ -220,6 +222,34 @@ export async function addBookmark(
 
 export async function deleteBookmark(bookId: number, bookmarkId: number): Promise<void> {
   await request<void>(`/api/v1/books/${bookId}/bookmarks/${bookmarkId}`, { method: 'DELETE' });
+}
+
+// --- Cleaned export ---------------------------------------------------------
+
+function exportParams(rules: ExportRules, chunkChars: number): string {
+  return new URLSearchParams({
+    chunk: String(chunkChars),
+    promo: rules.promo ? '1' : '0',
+    edges: rules.edges ? '1' : '0',
+    normalise: rules.normalise ? '1' : '0',
+    notes: rules.notes ? '1' : '0',
+  }).toString();
+}
+
+/** Statistics plus the first few chunks, so the dialog can show what a
+ *  given rule combination would actually strip before committing. */
+export async function previewExport(
+  id: number,
+  rules: ExportRules,
+  chunkChars: number,
+): Promise<ExportPreview> {
+  return request<ExportPreview>(`/api/v1/books/${id}/export?preview=1&${exportParams(rules, chunkChars)}`);
+}
+
+/** The download URL. Same origin with Content-Disposition, so a plain
+ *  anchor is enough — no blob juggling. */
+export function exportURL(id: number, rules: ExportRules, chunkChars: number): string {
+  return `/api/v1/books/${id}/export?${exportParams(rules, chunkChars)}`;
 }
 
 // --- Reading fonts ----------------------------------------------------------

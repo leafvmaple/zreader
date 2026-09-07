@@ -64,7 +64,8 @@ backend/
   internal/
     config/            paths + env wiring
     library/           file scanning, encoding detection, TXT/PDF/EPUB import,
-                       chapter parsing, author metadata
+                       chapter parsing, author metadata, cover extraction
+    export/            cleaning passes + JSONL chunking for the AI export
     server/            HTTP router + handlers (net/http stdlib mux)
     store/             sqlite layer (modernc.org/sqlite — CGO-free)
     webui/             embed.FS for the built SPA
@@ -162,6 +163,34 @@ Older builds rewrote the source TXT in place and saved the original as
 mutation: `<path>.bak` becomes `<path>` again, `.bak` is removed. From
 then on the source is pristine and the cached file under
 `<author>/<title>.epub` becomes the text reader source.
+
+## Export cleaning — rules are data, not a plugin interface
+
+`internal/export` strips pirate-rip debris (promo lines, repeated
+per-chapter headers, author notes) and cuts the result into JSONL
+chunks. It reads the same flat text the reader serves, so an export
+matches what you read; chunk offsets index the book's own char-offset
+space and stay traceable back to a reading position.
+
+**There is deliberately no plugin mechanism.** Go's `plugin` package
+needs matching Go and dependency versions, forces CGO, and kills
+cross-compilation — all of which conflict with the CGO-free sqlite and
+single static binary this project is built around. Out-of-process
+plugins would add IPC and a versioned protocol for what is a list of
+regexes over text. What actually varies between libraries is the
+*patterns*, so `<data>/clean-rules.json` extends the built-in lists at
+runtime, in the same spirit as the `<name>.chapters.json` sidecar.
+
+**Two constraints worth keeping when touching the passes:**
+
+- A false positive silently deletes a line of the user's book, which is
+  worse than leaving an ad in. Whole-paragraph removal is length-gated
+  (`promoMaxRunes`, `edgeMaxRunes`); a long paragraph only loses the
+  matched span, and a long *repeated* paragraph is treated as a refrain
+  rather than a header.
+- RE2 has no backreferences. "Three or more of the same mark" cannot be
+  written as a pattern — that's why `collapseRepeatedMarks` is a
+  function. A `([！？]){3,}` regex would also fold `？！`, which is wrong.
 
 ## Chapter detection — tiered
 

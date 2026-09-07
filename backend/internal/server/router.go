@@ -54,6 +54,7 @@ func (s *Server) newRouter() http.Handler {
 	mux.HandleFunc("GET /api/v1/books/{id}/source", s.handleBookSource)
 	mux.HandleFunc("GET /api/v1/books/{id}/cover", s.handleBookCover)
 	mux.HandleFunc("GET /api/v1/books/{id}/content", s.handleBookContent)
+	mux.HandleFunc("GET /api/v1/books/{id}/export", s.handleExportBook)
 	mux.HandleFunc("GET /api/v1/books/{id}/search", s.handleSearchBook)
 	mux.HandleFunc("POST /api/v1/books/{id}/reparse", s.handleReparseBook)
 	mux.HandleFunc("GET /api/v1/books/{id}/bookmarks", s.handleListBookmarks)

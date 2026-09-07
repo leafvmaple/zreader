@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import * as api from '../api/client';
 import { BookCover } from '../components/BookCover';
 import { Dialog } from '../components/Dialog';
+import { ExportDialog } from '../components/ExportDialog';
 import type { Book, DuplicateGroup, Folder, LibraryJob, Progress, ReadingStatus, Tag } from '../types/api';
 import './ShelfPage.css';
 
@@ -268,6 +269,7 @@ export function ShelfPage() {
   const [deleteSource, setDeleteSource] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteMsg, setDeleteMsg] = useState<string | null>(null);
+  const [exportBook, setExportBook] = useState<Book | null>(null);
 
   // Every entry point resets the source checkbox: an opt-in that
   // remembered its last value would be an opt-in in name only.
@@ -686,6 +688,18 @@ export function ShelfPage() {
             }}
           >
             {action === 'reparse' ? '解析中…' : '重新解析'}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={b.format !== 'epub'}
+            title={b.format !== 'epub' ? '这本书没有可导出的文本层' : undefined}
+            onClick={() => {
+              setExportBook(b);
+              close();
+            }}
+          >
+            导出给 AI…
           </button>
           <button
             type="button"
@@ -1248,6 +1262,8 @@ export function ShelfPage() {
           {editMsg && <div className="form-error">{editMsg}</div>}
         </Dialog>
       )}
+
+      {exportBook && <ExportDialog book={exportBook} onClose={() => setExportBook(null)} />}
 
       {deleteTarget && (
         <Dialog
