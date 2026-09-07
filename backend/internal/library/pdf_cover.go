@@ -17,10 +17,11 @@ package library
 // objects whose payload starts with a JPEG SOI marker, and take the first
 // one big enough to be a page rather than a logo.
 //
-// PDFs that store images as raw Flate-compressed samples are skipped —
-// those aren't a file in any format a browser reads, and re-encoding them
-// would mean pulling in the colour-space handling this deliberately
-// avoids. Those books fall back to a generated cover.
+// PDFs that store images as raw Flate-compressed samples carry no such
+// file, and are handled separately in pdf_flate_cover.go: the samples are
+// decoded and re-encoded, for the colour spaces where that can be done
+// without guessing. Anything outside both paths falls back to a generated
+// cover.
 
 import (
 	"bytes"
@@ -78,7 +79,17 @@ func ExtractPDFCover(pdfPath string) (*Cover, error) {
 		}
 		return &Cover{Data: data, MediaType: "image/jpeg"}, nil
 	}
-	return nil, nil
+
+	// No embedded JPEG. The file may still hold a page image as raw
+	// samples; that path needs a real parse, so it runs only once the
+	// cheap scan has come up empty.
+	cover, err := extractPDFFlateCover(pdfPath)
+	if err != nil {
+		// A malformed PDF is a normal thing to meet during a scan, and the
+		// book still reads — the caller's fallback cover is the answer.
+		return nil, nil
+	}
+	return cover, nil
 }
 
 // jpegStreams yields the payload of every stream object in buf whose data

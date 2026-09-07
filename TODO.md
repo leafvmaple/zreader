@@ -39,23 +39,31 @@ either a cleaner source or a manual `<filename>.chapters.json` override
 (cross-referenced with the "asymmetric subtitle" entry above as a candidate
 use case for the same mechanism).
 
-## Covers — PDFs with no embedded JPEG still fall back
+## Covers — PDFs drawn rather than scanned still fall back
 
-`backend/internal/library/pdf_cover.go`
+`backend/internal/library/pdf_cover.go`, `pdf_flate_cover.go`
 
-PDF covers are lifted by scanning the head of the file for stream objects
-whose payload starts with a JPEG SOI, which covers scanned PDFs (page 1 *is*
-one JPEG) and most text-layer PDFs with cover plates.
+Two paths now. The cheap one scans the head of the file for stream objects
+whose payload starts with a JPEG SOI — scanned PDFs (page 1 *is* one JPEG)
+and most text-layer PDFs with cover plates. When that comes up empty, the
+second decodes raw Flate-compressed samples: 8-bit DeviceGray / DeviceRGB /
+ICCBased(N=1,3), and Indexed over those.
 
-Not covered: PDFs that store images as raw Flate-compressed samples rather
-than an embedded JPEG. Those aren't a file in any format a browser reads,
-and turning them into one means implementing PDF colour-space handling
-(DeviceN, Indexed, ICCBased, `/Decode` arrays, SMask alpha) — a lot of
-surface for the remaining minority. They fall back to a generated cover.
+Still not covered, deliberately: DeviceCMYK and Separation (need ink models
+to look right), Lab, DeviceN, sub-byte depths, 16-bit samples, `/Decode`
+arrays, and images with an SMask. Each would need a guess, and a
+wrong-coloured cover is worse than the generated one it replaces.
 
-A page rasteriser would solve both this and any PDF whose page 1 is drawn
-rather than scanned, but every pure-Go option is heavy and the CGO ones cost
-the single static binary.
+Also still not covered: a PDF whose page 1 is *drawn* — vector text and
+paths, no image object at all. That needs a page rasteriser, and every
+pure-Go option is heavy while the CGO ones cost the single static binary.
+
+Follow-up worth doing if a library ever holds many such PDFs: the Flate
+path runs per cover request for image-only PDFs (`handlers_books.go`
+serves those from source, with an ETag but no stored cover). Inflating and
+re-encoding a full-page raster is far more expensive than the JPEG scan it
+falls back from. Caching the extracted cover next to the source, the way
+`ocr.go` caches its searchable PDF, would fix it.
 
 ## Shelf — only the list and grid are windowed
 
