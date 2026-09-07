@@ -4,6 +4,7 @@ import * as api from '../api/client';
 import { BookCover } from '../components/BookCover';
 import { Dialog } from '../components/Dialog';
 import { ExportDialog } from '../components/ExportDialog';
+import { useColumnCount, useWindowedList } from '../hooks/useWindowedList';
 import type { Book, DuplicateGroup, Folder, LibraryJob, Progress, ReadingStatus, Tag } from '../types/api';
 import './ShelfPage.css';
 
@@ -18,6 +19,12 @@ type DeleteTarget = { kind: 'one'; book: Book } | { kind: 'many'; ids: number[] 
 
 const THEME_KEY = 'zreader.theme';
 const VIEW_KEY = 'zreader.view';
+
+// Shelves shorter than this render in full; see the windowing block below.
+const WINDOW_THRESHOLD = 60;
+// Starting guesses, replaced by measurement once anything is on screen.
+const LIST_ROW_ESTIMATE = 101;
+const GRID_ROW_ESTIMATE = 320;
 
 function loadView(): ViewMode {
   try {
@@ -656,6 +663,51 @@ export function ShelfPage() {
       .slice(0, 5);
   }, [books, progress]);
 
+  // --- Windowing -----------------------------------------------------------
+  //
+  // Below WINDOW_THRESHOLD every book is rendered: the machinery costs more
+  // than it saves at that size, and a fully rendered shelf keeps the
+  // browser's own find-in-page working across the whole library.
+
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const gridRef = useRef<HTMLUListElement | null>(null);
+  const windowed = filtered.length > WINDOW_THRESHOLD;
+
+  const listWindow = useWindowedList({
+    count: filtered.length,
+    estimate: LIST_ROW_ESTIMATE,
+    containerRef: listRef,
+    enabled: windowed && view === 'list',
+  });
+
+  // Grid cards are uniform — a fixed-ratio cover over three single-line
+  // rows — so one measurement describes every row and no per-row
+  // measurement is needed. The list can't do that: a book with tags is
+  // taller than one without.
+  const columns = useColumnCount(gridRef, windowed && view === 'grid');
+  const [gridRowHeight, setGridRowHeight] = useState(GRID_ROW_ESTIMATE);
+  const measureGridRow = useCallback((el: HTMLLIElement | null) => {
+    if (!el) return;
+    const gap = parseFloat(getComputedStyle(el.parentElement!).rowGap) || 0;
+    const h = el.getBoundingClientRect().height + gap;
+    setGridRowHeight((prev) => (Math.abs(prev - h) > 1 ? h : prev));
+  }, []);
+
+  const gridRows = Math.ceil(filtered.length / Math.max(1, columns));
+  const gridWindow = useWindowedList({
+    count: gridRows,
+    estimate: gridRowHeight,
+    containerRef: gridRef,
+    // One grid row is a whole screen-width of cards, so the list's
+    // row-count overscan would keep an order of magnitude more nodes
+    // mounted here for the same amount of scroll headroom.
+    overscan: 3,
+    enabled: windowed && view === 'grid',
+  });
+
+  const visibleList = filtered.slice(listWindow.start, listWindow.end);
+  const visibleGrid = filtered.slice(gridWindow.start * columns, gridWindow.end * columns);
+
   // --- Render --------------------------------------------------------------
 
   // Per-book management actions, shared by the list rows and the grid
@@ -1005,14 +1057,22 @@ export function ShelfPage() {
             )}
           </div>
         ) : view === 'grid' ? (
-          <ul className="book-grid">
-            {filtered.map((b) => {
+          <ul
+            ref={gridRef}
+            className="book-grid"
+            style={{ paddingTop: gridWindow.padTop, paddingBottom: gridWindow.padBottom }}
+          >
+            {visibleGrid.map((b, i) => {
               const p = progress[b.id];
               const pct = b.char_count ? Math.round(((p?.char_offset ?? 0) / b.char_count) * 100) : 0;
               const action = bookBusy[b.id];
               const isSelected = selected.includes(b.id);
               return (
-                <li key={b.id} className={`book-card${isSelected ? ' is-selected' : ''}`}>
+                <li
+                  key={b.id}
+                  ref={i === 0 ? measureGridRow : undefined}
+                  className={`book-card${isSelected ? ' is-selected' : ''}`}
+                >
                   <label className="book-card__select" aria-label={`选择 ${b.title}`}>
                     <input
                       type="checkbox"
@@ -1049,14 +1109,24 @@ export function ShelfPage() {
             })}
           </ul>
         ) : (
-          <ul className="book-list">
-            {filtered.map((b) => {
+          <ul
+            ref={listRef}
+            className={`book-list${listWindow.start > 0 ? ' is-clipped-top' : ''}${
+              listWindow.end < filtered.length ? ' is-clipped-bottom' : ''
+            }`}
+            style={{ paddingTop: listWindow.padTop, paddingBottom: listWindow.padBottom }}
+          >
+            {visibleList.map((b, i) => {
               const p = progress[b.id];
               const pct = b.char_count ? Math.round(((p?.char_offset ?? 0) / b.char_count) * 100) : 0;
               const action = bookBusy[b.id];
               const isSelected = selected.includes(b.id);
               return (
-                <li key={b.id} className={`book-row${isSelected ? ' is-selected' : ''}`}>
+                <li
+                  key={b.id}
+                  ref={listWindow.measure(listWindow.start + i)}
+                  className={`book-row${isSelected ? ' is-selected' : ''}`}
+                >
                   <label className="book-row__select" aria-label={`选择 ${b.title}`}>
                     <input
                       type="checkbox"

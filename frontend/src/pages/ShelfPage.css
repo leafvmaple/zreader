@@ -743,6 +743,19 @@
 .book-row:only-child,
 .book-row:only-child .book-row__link { border-radius: 14px; }
 
+/* While windowed, the first and last rendered rows are usually NOT the
+ * first and last books — rounding them would draw a card edge in the
+ * middle of the list. The classes are only set when rows are actually
+ * clipped off that end. */
+.book-list.is-clipped-top .book-row:first-child,
+.book-list.is-clipped-top .book-row:first-child .book-row__link,
+.book-list.is-clipped-bottom .book-row:last-child,
+.book-list.is-clipped-bottom .book-row:last-child .book-row__link {
+  border-radius: 0;
+}
+
+.book-list.is-clipped-top .book-row:first-child { border-top: 1px solid var(--border); }
+
 .book-row {
   position: relative;
   display: grid;
