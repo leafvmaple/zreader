@@ -50,13 +50,14 @@ func TestBuild_DropsPromoLines(t *testing.T) {
 			"甲乙丙丁，戊己庚辛。东南西北，春夏秋冬。",
 			"更多精彩小说尽在 www.example-invalid.test，请记住本站域名！",
 			"本书由甲乙丙整理制作",
+			"※声明：本电子书仅供读者预览，请在下载后删除，请购买正版。※",
 			"壬癸子丑，寅卯辰巳。午未申酉，戌亥天干。",
 		},
 	)
 	chunks, stats := Build(Meta{Title: "示例书"}, chapters, flat, allRules(), nil)
 	got := joinText(chunks)
 
-	for _, gone := range []string{"example-invalid.test", "记住本站", "整理制作"} {
+	for _, gone := range []string{"example-invalid.test", "记住本站", "整理制作", "电子书仅供"} {
 		if strings.Contains(got, gone) {
 			t.Errorf("promo text %q survived the export", gone)
 		}
@@ -66,8 +67,8 @@ func TestBuild_DropsPromoLines(t *testing.T) {
 			t.Errorf("body text %q was removed", kept)
 		}
 	}
-	if stats.DroppedParas < 2 {
-		t.Errorf("DroppedParas = %d, want at least the two promo lines", stats.DroppedParas)
+	if stats.DroppedParas < 3 {
+		t.Errorf("DroppedParas = %d, want at least the three promo lines", stats.DroppedParas)
 	}
 }
 
