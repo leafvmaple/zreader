@@ -15,6 +15,7 @@ import type {
   ScanResult,
   SearchMatch,
   Tag,
+  ReadingFont,
   UploadResult,
 } from '../types/api';
 
@@ -221,10 +222,36 @@ export async function deleteBookmark(bookId: number, bookmarkId: number): Promis
   await request<void>(`/api/v1/books/${bookId}/bookmarks/${bookmarkId}`, { method: 'DELETE' });
 }
 
+// --- Reading fonts ----------------------------------------------------------
+
+export async function listFonts(): Promise<ReadingFont[]> {
+  const out = await request<{ fonts: ReadingFont[] }>('/api/v1/fonts');
+  return out.fonts ?? [];
+}
+
+export function fontURL(file: string): string {
+  return `/api/v1/fonts/${encodeURIComponent(file)}`;
+}
+
 // --- Progress ---------------------------------------------------------------
 
 export async function getProgress(bookId: number): Promise<Progress> {
   return request<Progress>(`/api/v1/progress/${bookId}`);
+}
+
+/**
+ * Every saved position for the current user, keyed by book id. One request
+ * for the whole shelf — the alternative is a getProgress per book, which
+ * is a request per book in the library on every refresh.
+ *
+ * Books with no saved position are absent from the map; callers treat a
+ * missing entry as "not started".
+ */
+export async function listProgress(): Promise<Record<number, Progress>> {
+  const out = await request<{ progress: Progress[] }>('/api/v1/progress');
+  const map: Record<number, Progress> = {};
+  for (const p of out.progress ?? []) map[p.book_id] = p;
+  return map;
 }
 
 export type PutProgressResult =

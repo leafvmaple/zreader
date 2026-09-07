@@ -3,7 +3,7 @@ import type { MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as api from '../api/client';
 import { useThrottledProgress } from '../hooks/useThrottledProgress';
-import type { Book, Bookmark, Chapter, Progress, SearchMatch } from '../types/api';
+import type { Book, Bookmark, Chapter, Progress, ReadingFont, SearchMatch } from '../types/api';
 import './ReaderPage.css';
 
 // Consistent line-icon set for the reader chrome — replaces the earlier mix
@@ -79,7 +79,9 @@ const IconChevronRight = () => (
 // explicit surfaces. See resolveTheme.
 type Theme = 'auto' | 'paper' | 'light' | 'green' | 'dark' | 'black';
 type FontSize = 'sm' | 'md' | 'lg' | 'xl';
-type FontFamily = 'system' | 'songti' | 'wenkai';
+// Built-in families all resolve from device fonts; 'custom' means a file
+// the user dropped into <data>/fonts, named by Settings.customFont.
+type FontFamily = 'sans' | 'serif' | 'kai' | 'custom';
 type LineHeight = 'compact' | 'normal' | 'loose';
 type ParagraphGap = 'compact' | 'normal' | 'loose';
 type PageWidth = 'narrow' | 'normal' | 'wide';
@@ -93,12 +95,14 @@ type Settings = {
   gap: ParagraphGap;
   width: PageWidth;
   indent: IndentMode;
+  /** Filename under <data>/fonts, when font === 'custom'. */
+  customFont?: string;
 };
 
 const DEFAULT_SETTINGS: Settings = {
   theme: 'auto',
   size: 'md',
-  font: 'songti',
+  font: 'serif',
   line: 'normal',
   gap: 'normal',
   width: 'normal',
@@ -124,11 +128,11 @@ function resolveTheme(theme: Theme): Exclude<Theme, 'auto'> {
   return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'paper';
 }
 
-const FONT_LABELS: Record<FontFamily, string> = {
-  system: '系统默认',
-  songti: '思源宋体',
-  wenkai: '霞鹜文楷',
-};
+const BUILTIN_FONTS: { key: FontFamily; label: string }[] = [
+  { key: 'serif', label: '宋体' },
+  { key: 'sans', label: '黑体' },
+  { key: 'kai', label: '楷体' },
+];
 const LINE_LABELS: Record<LineHeight, string> = {
   compact: '紧凑',
   normal: '标准',
@@ -167,6 +171,14 @@ const LEGACY_THEMES: Record<string, Theme> = {
   grey: 'dark',
 };
 
+// Likewise for fonts: `system` and `songti` were the same serif stack and
+// `wenkai` was a CDN webfont that no longer loads.
+const LEGACY_FONTS: Record<string, FontFamily> = {
+  system: 'serif',
+  songti: 'serif',
+  wenkai: 'kai',
+};
+
 function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -176,6 +188,9 @@ function loadSettings(): Settings {
       delete stored.margin;
       if (stored.theme && LEGACY_THEMES[stored.theme]) {
         stored.theme = LEGACY_THEMES[stored.theme];
+      }
+      if (stored.font && LEGACY_FONTS[stored.font]) {
+        stored.font = LEGACY_FONTS[stored.font];
       }
       return { ...DEFAULT_SETTINGS, ...stored };
     }
@@ -404,6 +419,7 @@ export function ReaderPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [customFonts, setCustomFonts] = useState<ReadingFont[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [showTOC, setShowTOC] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -579,6 +595,37 @@ export function ReaderPage() {
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
+
+  // --- User-supplied fonts ------------------------------------------------
+  // An empty <data>/fonts is the common case, so this is one cheap request
+  // that usually returns []. A failure is not worth surfacing — the built-in
+  // system stacks are always available.
+
+  useEffect(() => {
+    api.listFonts().then(setCustomFonts).catch(() => setCustomFonts([]));
+  }, []);
+
+  // Register the selected file under one fixed family name, which
+  // .reader--font-custom points at. Using FontFace rather than an injected
+  // <style> means swapping fonts replaces the old registration instead of
+  // stacking up rules.
+  useEffect(() => {
+    if (settings.font !== 'custom' || !settings.customFont) return;
+    const face = new FontFace('zreader-custom', `url(${JSON.stringify(api.fontURL(settings.customFont))})`);
+    let cancelled = false;
+    face
+      .load()
+      .then(() => {
+        if (!cancelled) document.fonts.add(face);
+      })
+      .catch(() => {
+        /* falls back to the stack behind it in .reader--font-custom */
+      });
+    return () => {
+      cancelled = true;
+      document.fonts.delete(face);
+    };
+  }, [settings.font, settings.customFont]);
 
   // --- Scroll-to-offset, single source of truth --------------------------
   // Walks the DOM for the chapter that contains `charOffset` (must be in
@@ -1472,16 +1519,35 @@ export function ReaderPage() {
               <div className="settings__row">
                 <span className="settings__label">字体</span>
                 <div className="settings__fonts">
-                  {(['system', 'songti', 'wenkai'] as FontFamily[]).map((f) => (
+                  {BUILTIN_FONTS.map((f) => (
                     <button
-                      key={f}
-                      className={`font-btn font-btn--${f}${settings.font === f ? ' is-active' : ''}`}
-                      onClick={() => setSettings((s) => ({ ...s, font: f }))}
+                      key={f.key}
+                      className={`font-btn font-btn--${f.key}${settings.font === f.key ? ' is-active' : ''}`}
+                      onClick={() => setSettings((s) => ({ ...s, font: f.key }))}
                     >
-                      {FONT_LABELS[f]}
+                      {f.label}
                     </button>
                   ))}
                 </div>
+                {customFonts.length > 0 && (
+                  <div className="settings__fonts settings__fonts--custom">
+                    {customFonts.map((f) => (
+                      <button
+                        key={f.file}
+                        className={`font-btn font-btn--custom${
+                          settings.font === 'custom' && settings.customFont === f.file ? ' is-active' : ''
+                        }`}
+                        onClick={() => setSettings((s) => ({ ...s, font: 'custom', customFont: f.file }))}
+                        title={f.name}
+                      >
+                        {f.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p className="settings__hint">
+                  内置字体全部来自系统，不联网。把 woff2 / ttf 放进 <code>&lt;data&gt;/fonts</code> 可以加入这个列表。
+                </p>
               </div>
               <div className="settings__row">
                 <span className="settings__label">行距</span>

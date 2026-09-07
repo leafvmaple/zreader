@@ -28,6 +28,10 @@ func (s *Server) newRouter() http.Handler {
 		})
 	})
 
+	// User-supplied reading fonts (optional, <data>/fonts)
+	mux.HandleFunc("GET /api/v1/fonts", s.handleListFonts)
+	mux.HandleFunc("GET /api/v1/fonts/{file}", s.handleGetFont)
+
 	// Library folders + scan
 	mux.HandleFunc("GET /api/v1/library/folders", s.handleListFolders)
 	mux.HandleFunc("POST /api/v1/library/folders", s.handleAddFolder)
@@ -57,6 +61,7 @@ func (s *Server) newRouter() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/books/{id}/bookmarks/{bookmark_id}", s.handleDeleteBookmark)
 
 	// Reading progress (per-user)
+	mux.HandleFunc("GET /api/v1/progress", s.handleListProgress)
 	mux.HandleFunc("GET /api/v1/progress/{book_id}", s.handleGetProgress)
 	mux.HandleFunc("PUT /api/v1/progress/{book_id}", s.handlePutProgress)
 

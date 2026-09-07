@@ -106,6 +106,13 @@ export type LibraryJob = {
   finished_at?: number;
 };
 
+/** A woff2/ttf the user dropped into <data>/fonts, offered in the reader. */
+export type ReadingFont = {
+  file: string;
+  name: string;
+  size_bytes: number;
+};
+
 export type Tag = {
   id: number;
   name: string;

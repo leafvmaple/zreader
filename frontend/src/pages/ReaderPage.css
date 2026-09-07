@@ -28,24 +28,42 @@
   text-rendering: optimizeLegibility;
 }
 
-/* --- Fonts --------------------------------------------------------------- */
-/* System falls back to platform default CJK serif then sans. The webfonts
- * are unicode-range subsetted upstream + font-display:swap, so picking
- * them never blocks first paint. */
+/* --- Fonts ---------------------------------------------------------------
+ *
+ * All three built-ins resolve entirely from fonts the device already has.
+ * The reader used to load Noto Serif SC from Google Fonts and LXGW WenKai
+ * from jsdelivr on every page load, with the Google one as the *default* —
+ * so a zreader on a LAN with no egress silently fell back to system fonts
+ * anyway, and every load leaked a request to two third parties. Bundling
+ * them instead isn't worth it either: the subsetted WenKai package alone is
+ * about 19 MB against a ~23 MB container.
+ *
+ * (The old `system` and `songti` options shipped identical stacks, so the
+ * picker really offered two choices, not three. These are actually
+ * distinct: sans, serif, and kai.)
+ *
+ * A user who wants a specific webfont drops it into <data>/fonts and picks
+ * it in the same list — see readingFontFamily in ReaderPage.tsx. */
 
-.reader--font-system {
-  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif CN',
-    'PingFang SC', 'Songti SC', 'STSong', SimSun, serif;
+.reader--font-sans {
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Source Han Sans SC',
+    'Noto Sans CJK SC', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;
 }
 
-.reader--font-songti {
-  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif CN',
-    'PingFang SC', 'Songti SC', 'STSong', SimSun, serif;
+.reader--font-serif {
+  font-family: 'Songti SC', 'STSong', 'Source Han Serif SC', 'Noto Serif CJK SC',
+    'SimSun', 'AR PL UMing CN', serif;
 }
 
-.reader--font-wenkai {
-  font-family: 'LXGW WenKai Screen', 'LXGW WenKai', 'KaiTi', STKaiti,
-    'PingFang SC', serif;
+.reader--font-kai {
+  font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', 'LXGW WenKai Screen', 'LXGW WenKai',
+    'AR PL UKai CN', 'Songti SC', serif;
+}
+
+/* Set when a user font from <data>/fonts is selected; the @font-face is
+ * injected at runtime under this exact family name. */
+.reader--font-custom {
+  font-family: 'zreader-custom', 'Songti SC', 'STSong', serif;
 }
 
 /* --- Themes --------------------------------------------------------------
@@ -678,6 +696,34 @@
 /* Font names are short — three across reads better than a stack of
  * full-width buttons, and matches the other segmented rows. */
 .settings__fonts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+
+/* User fonts have arbitrary-length filenames, so give them two columns and
+ * let the label ellipsis rather than the grid blow out. */
+.settings__fonts--custom {
+  grid-template-columns: repeat(2, 1fr);
+  margin-top: 8px;
+}
+
+.settings__fonts--custom .font-btn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings__hint {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--r-fg-muted);
+}
+
+.settings__hint code {
+  background: var(--r-overlay);
+  color: inherit;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+}
 .settings__seg {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -716,9 +762,12 @@
   transition: background 100ms ease, border-color 100ms ease;
 }
 
-.font-btn--system { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-.font-btn--songti { font-family: 'Noto Serif SC', 'Source Han Serif SC', serif; }
-.font-btn--wenkai { font-family: 'LXGW WenKai Screen', 'LXGW WenKai', serif; }
+/* Each button previews its own family, so the label reads in the face it
+ * selects. */
+.font-btn--sans { font-family: 'PingFang SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif; }
+.font-btn--serif { font-family: 'Songti SC', 'STSong', 'Source Han Serif SC', SimSun, serif; }
+.font-btn--kai { font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', serif; }
+.font-btn--custom { font-family: 'zreader-custom', 'Songti SC', serif; }
 
 .font-btn:hover { background: var(--r-overlay); }
 .font-btn.is-active {

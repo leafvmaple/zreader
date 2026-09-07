@@ -88,6 +88,31 @@ func (s *Store) ProgressMap(ctx context.Context, userID string, bookIDs []int64)
 	return out, rows.Err()
 }
 
+// AllProgress returns every saved position for a user, keyed by book id.
+// The shelf needs the whole set at once and doesn't know which books have
+// a row, so filtering by id (ProgressMap) would mean sending the entire
+// library's ids up just to get a subset back.
+func (s *Store) AllProgress(ctx context.Context, userID string) (map[int64]Progress, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT user_id, book_id, char_offset, chapter_idx, chapter_offset, updated_at
+          FROM user_progress
+         WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[int64]Progress{}
+	for rows.Next() {
+		var p Progress
+		if err := rows.Scan(&p.UserID, &p.BookID, &p.CharOffset, &p.ChapterIdx, &p.ChapterOffset, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out[p.BookID] = p
+	}
+	return out, rows.Err()
+}
+
 // Used to keep the unused-import linter calm when database/sql is otherwise
 // only referenced via Store (which lives in store.go).
 var _ = sql.ErrNoRows

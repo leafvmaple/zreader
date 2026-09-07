@@ -328,32 +328,26 @@ export function ShelfPage() {
     setLoading(true);
     setError(null);
     try {
-      const [list, folderList, tagList, jobList, duplicateList] = await Promise.all([
+      const [list, folderList, tagList, jobList, duplicateList, progressMap] = await Promise.all([
         api.listBooks(),
         api.listFolders(),
         api.listTags(),
         api.listJobs(20),
         api.duplicateBooks(),
+        api.listProgress(),
       ]);
       setBooks(list);
       setFolders(folderList);
       setTags(tagList);
       setJobs(jobList);
       setDuplicates(duplicateList);
+      setProgress(progressMap);
       setSelected((current) => current.filter((id) => list.some((b) => b.id === id)));
       setUploadFolderId((current) =>
         current !== undefined && folderList.some((f) => f.id === current)
           ? current
           : folderList[0]?.id,
       );
-      // Fan out progress fetches — fine for a few dozen books; if a library
-      // grows past that we'll batch this into a single endpoint.
-      const progPairs = await Promise.all(
-        list.map(async (b) => [b.id, await api.getProgress(b.id)] as const),
-      );
-      const map: Record<number, Progress> = {};
-      for (const [id, p] of progPairs) map[id] = p;
-      setProgress(map);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -516,6 +510,22 @@ export function ShelfPage() {
       setEditBusy(false);
     }
   }, [editBook, editForm, refresh]);
+
+  // Favouriting used to run the full refresh() — six list endpoints plus,
+  // before the batch progress endpoint, one request per book — to flip one
+  // boolean. Patch the row in place and let the server confirm.
+  const onToggleFavorite = useCallback(async (book: Book) => {
+    const next = !book.favorite;
+    setBooks((prev) => prev.map((b) => (b.id === book.id ? { ...b, favorite: next } : b)));
+    try {
+      const updated = await api.patchBook(book.id, { favorite: next });
+      setBooks((prev) => prev.map((b) => (b.id === book.id ? { ...b, ...updated } : b)));
+    } catch (err) {
+      // Roll back to what the server still believes.
+      setBooks((prev) => prev.map((b) => (b.id === book.id ? { ...b, favorite: book.favorite } : b)));
+      setScanMsg(`收藏失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, []);
 
   const toggleSelected = useCallback((id: number) => {
     setSelected((current) =>
@@ -698,7 +708,7 @@ export function ShelfPage() {
     <button
       type="button"
       className={`${className}${b.favorite ? ' is-active' : ''}`}
-      onClick={() => void api.patchBook(b.id, { favorite: !b.favorite }).then(refresh)}
+      onClick={() => void onToggleFavorite(b)}
       disabled={action !== undefined}
       aria-label={b.favorite ? '取消收藏' : '收藏'}
       aria-pressed={b.favorite}

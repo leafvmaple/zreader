@@ -60,6 +60,7 @@ func main() {
 		Version: Version,
 		Logger:  logger,
 		Store:   st,
+		DataDir: paths.Data,
 	})
 
 	errCh := make(chan error, 1)

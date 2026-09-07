@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/leafvmaple/zreader/internal/store"
@@ -16,6 +17,35 @@ type progressDTO struct {
 	ChapterIdx    int64 `json:"chapter_idx"`
 	ChapterOffset int64 `json:"chapter_offset"`
 	UpdatedAt     int64 `json:"updated_at"`
+}
+
+// handleListProgress returns every saved position for the current user in
+// one response.
+//
+// The shelf used to fan out one GET /progress/{id} per book on every
+// refresh — and it refreshes after any mutation, so toggling a single
+// favourite star cost one request per book in the library. This collapses
+// that to one. Books with no saved position are simply absent; the client
+// already treats a missing entry as "not started".
+func (s *Server) handleListProgress(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	all, err := s.store.AllProgress(r.Context(), u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list_progress", err)
+		return
+	}
+	out := make([]progressDTO, 0, len(all))
+	for _, p := range all {
+		out = append(out, progressDTO{
+			BookID:        p.BookID,
+			CharOffset:    p.CharOffset,
+			ChapterIdx:    p.ChapterIdx,
+			ChapterOffset: p.ChapterOffset,
+			UpdatedAt:     p.UpdatedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BookID < out[j].BookID })
+	writeJSON(w, http.StatusOK, map[string]any{"progress": out})
 }
 
 func (s *Server) handleGetProgress(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +100,7 @@ func (s *Server) handlePutProgress(w http.ResponseWriter, r *http.Request) {
 		if existing, err := s.store.GetProgress(r.Context(), u.ID, bookID); err == nil {
 			if existing.UpdatedAt > body.UpdatedAt {
 				writeJSON(w, http.StatusConflict, map[string]any{
-					"error":  "stale_write",
+					"error": "stale_write",
 					"server": progressDTO{
 						BookID:        existing.BookID,
 						CharOffset:    existing.CharOffset,

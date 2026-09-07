@@ -20,6 +20,9 @@ type Config struct {
 	Version string
 	Logger  *log.Logger
 	Store   *store.Store
+	// DataDir is ZREADER_DATA_DIR. Only the optional <data>/fonts
+	// directory is read through it; the database opens its own handle.
+	DataDir string
 }
 
 // Server is the typed HTTP server. The handlers/* files hang methods off it
