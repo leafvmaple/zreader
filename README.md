@@ -400,7 +400,7 @@ reader.example.com {
 
 ## Build from source
 
-Requires Go 1.25+, Node 22+, pnpm 9+.
+Requires Go 1.26+, Node 22+, pnpm 9+.
 
 ```bash
 # Frontend → emits into backend/internal/webui/dist

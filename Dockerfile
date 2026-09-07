@@ -15,7 +15,11 @@ COPY frontend/ ./
 RUN pnpm build
 
 # --- Stage 2: compile the Go backend with the embedded SPA ------------------
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS backend
+# Keep this in step with backend/go.mod's `go` directive. CI's test job reads
+# the version from go.mod directly (setup-go's go-version-file), so a bump
+# there passes tests and only fails here — which is what happened when
+# golang.org/x/crypto pulled the module up to 1.26.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS backend
 WORKDIR /src/backend
 
 RUN apk add --no-cache git
