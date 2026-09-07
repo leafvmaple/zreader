@@ -87,9 +87,11 @@ ScanFolder(folder)
   ├─ Phase 1 — for each top-level supported source:
   │     FormatSourceToCache(folder, source)
   │       ├─ TXT/PDF text: detect/extract text, FormatText, ParseChapters
+  │       ├─ scanned PDF: optional ocrmypdf → text layer → same path
   │       ├─ EPUB: ReadEpub, preserve nested nav + readable block text
   │       ├─ EPUB: ExtractCover — cover art carried into the cached EPUB
   │       ├─ MOBI/AZW/AZW3: optional ebook-convert → EPUB → ReadEpub
+  │       ├─ PDF: ExtractPDFCover — first embedded JPEG becomes the cover
   │       ├─ optional <source-stem>.chapters.json override
   │       └─ write → <folder>/<author>/<title>.epub (atomic)
   │          or keep image-only PDF as source-backed pdf-image
@@ -191,6 +193,33 @@ runtime, in the same spirit as the `<name>.chapters.json` sidecar.
 - RE2 has no backreferences. "Three or more of the same mark" cannot be
   written as a pattern — that's why `collapseRepeatedMarks` is a
   function. A `([！？]){3,}` regex would also fold `？！`, which is wrong.
+
+## External tools — delegate, don't embed
+
+Two capabilities are delegated to binaries rather than linked in, for the
+same reason: a Go implementation would cost either the CGO-free single
+static binary or a large fraction of the ~23 MB image.
+
+| Capability      | Tool           | Env                                          |
+| --------------- | -------------- | -------------------------------------------- |
+| MOBI/AZW import | `ebook-convert`| `ZREADER_EBOOK_CONVERT`                      |
+| Scanned-PDF OCR | `ocrmypdf`     | `ZREADER_OCR`, `ZREADER_OCR_CMD`, `_LANG`, `_TIMEOUT` |
+
+Both follow the same shape: a package-level `run*` var so tests inject a
+stub, env override before `exec.LookPath`, and combined output folded into
+the error. **OCR differs in two ways on purpose**, both because it takes
+minutes rather than seconds:
+
+- It never auto-detects. Presence on `PATH` is not consent to add half an
+  hour to a scan; `ZREADER_OCR` or `ZREADER_OCR_CMD` must be set.
+- Its output is cached at `<folder>/<author>/<title>.ocr.pdf` and reused
+  while it is newer than the source. Phase 1 re-formats every source on
+  every scan, so without this a re-scan would re-OCR the whole library.
+  The write goes through a `.tmp` + rename so an interrupted run can't
+  leave a partial file that the staleness check would accept.
+
+A failed or text-less OCR is **not** a scan failure — the book falls back
+to the source-backed page viewer, which is where it would have been anyway.
 
 ## Chapter detection — tiered
 

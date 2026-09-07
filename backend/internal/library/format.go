@@ -215,10 +215,20 @@ func FormatPDFToCache(folder, sourcePath string) (CacheResult, error) {
 	}
 	extracted, err := ExtractPDFText(sourcePath)
 	if err != nil {
-		if errors.Is(err, ErrPDFNoText) {
+		if !errors.Is(err, ErrPDFNoText) {
+			return CacheResult{}, err
+		}
+		// No text layer. With OCR enabled we can make one and then take
+		// the ordinary text path; otherwise the book stays readable
+		// through the source-backed page viewer, just not searchable.
+		ocrText, ok, ocrErr := ocrPDFText(folder, sourcePath, extracted)
+		if ocrErr != nil {
+			return CacheResult{}, ocrErr
+		}
+		if !ok {
 			return formatImagePDFToCache(sourcePath, st, extracted)
 		}
-		return CacheResult{}, err
+		extracted = ocrText
 	}
 	title, author := ResolveMetadata(filepath.Base(sourcePath), TxtMetadata{
 		Title:  extracted.Title,
@@ -235,6 +245,40 @@ func FormatPDFToCache(folder, sourcePath string) (CacheResult, error) {
 	cr, err := writeTextSourceToCache(folder, sourcePath, nil, st, "pdf-text", extracted.Text, title, author, cover, hash)
 	cr.SourcePath = sourcePath
 	return cr, err
+}
+
+// ocrPDFText runs OCR over a text-less PDF and re-extracts. It returns
+// ok=false whenever the book should simply fall back to the page viewer:
+// OCR disabled, OCR failed, or OCR ran but still produced no usable text
+// (a photo album, a PDF of blank scans). Only conditions that would make
+// the whole scan untrustworthy come back as an error.
+func ocrPDFText(folder, sourcePath string, meta PDFText) (PDFText, bool, error) {
+	title, author := ResolveMetadata(filepath.Base(sourcePath), TxtMetadata{
+		Title:  meta.Title,
+		Author: meta.Author,
+	})
+	searchable, err := ocrSearchablePDF(folder, sourcePath, author, title)
+	if err != nil {
+		if errors.Is(err, ErrOCRDisabled) {
+			return PDFText{}, false, nil
+		}
+		return PDFText{}, false, fmt.Errorf("ocr %s: %w", filepath.Base(sourcePath), err)
+	}
+	out, err := ExtractPDFText(searchable)
+	if err != nil {
+		// Including ErrPDFNoText: OCR ran and found nothing readable, so
+		// the page viewer is the honest result.
+		return PDFText{}, false, nil
+	}
+	// Carry over the metadata the original PDF declared — --force-ocr
+	// rasterises the file and the rebuilt one often loses it.
+	if out.Title == "" {
+		out.Title = meta.Title
+	}
+	if out.Author == "" {
+		out.Author = meta.Author
+	}
+	return out, true, nil
 }
 
 func formatImagePDFToCache(sourcePath string, st os.FileInfo, meta PDFText) (CacheResult, error) {

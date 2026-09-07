@@ -50,13 +50,21 @@ All optional. The defaults match the volume layout above.
 | `ZREADER_DATA_DIR`     | `/data`     | SQLite database (`library.db`) lives here. Persist this.              |
 | `ZREADER_LIBRARY_PATH` | `/library`  | One or more book roots, OS-listsep separated (`:` on Linux).          |
 | `ZREADER_EBOOK_CONVERT`| unset       | Optional path to Calibre `ebook-convert` for MOBI/AZW/AZW3 import.    |
+| `ZREADER_OCR`          | unset       | Set to `1` to OCR scanned PDFs on import. See [OCR](#ocr-for-scanned-pdfs). |
+| `ZREADER_OCR_CMD`      | unset       | Path to `ocrmypdf`. Setting it also enables OCR.                      |
+| `ZREADER_OCR_LANG`     | `chi_sim+eng` | Tesseract language codes passed to `ocrmypdf -l`.                   |
+| `ZREADER_OCR_TIMEOUT`  | `30m`       | Per-file OCR bound, as a Go duration (`45m`, `2h`).                   |
+
+**Library roots must be writable.** Formatted output is cached inside each
+root as `<author>/<title>.epub` (see [file layout](AGENTS.md#source-vs-cached-file-layout)),
+so a read-only mount fails every scan.
 
 Multiple library roots:
 
 ```bash
 docker run ... \
-  -v /mnt/novels:/novels:ro \
-  -v /mnt/tech-books:/tech:ro \
+  -v /mnt/novels:/novels \
+  -v /mnt/tech-books:/tech \
   -e ZREADER_LIBRARY_PATH=/novels:/tech \
   leafvmaple/zreader:latest
 ```
@@ -88,8 +96,8 @@ can write to it.
 - EPUB import via the same cached-EPUB reader used internally.
 - Text-layer PDF import: extracted text is normalised through the TXT chapter
   parser, then cached as EPUB.
-- Image-only/scanned PDF import: stored as a source-backed page reader mode,
-  without OCR.
+- Image-only/scanned PDF import: readable as pages out of the box, and
+  fully searchable when OCR is enabled — see [OCR](#ocr-for-scanned-pdfs).
 - MOBI/AZW/AZW3 import when Calibre `ebook-convert` is installed or configured
   with `ZREADER_EBOOK_CONVERT`.
 - Manual chapter override sidecars: put `<book>.chapters.json` next to a source
@@ -119,8 +127,43 @@ can write to it.
   Tailscale, etc.). Inside your homelab on a trusted network it's fine.
 - Single user. The schema has a `user_id` column but everyone is `default`
   in this mode.
-- Image-only/scanned PDFs are readable as pages, but not OCR-searchable yet.
+- Scanned PDFs need an external OCR tool; there is no built-in engine.
 - MOBI/AZW/AZW3 import requires an external converter; there is no native parser.
+
+### OCR for scanned PDFs
+
+A scanned PDF has no text layer, so it can't be searched, chapter-parsed or
+exported — only paged through. With OCR enabled, zreader turns it into an
+ordinary text-layer PDF on import and everything downstream works normally.
+
+The work goes to [ocrmypdf](https://ocrmypdf.readthedocs.io/), the same way
+MOBI import goes to Calibre. There's no built-in engine: no pure-Go OCR is
+good enough for Chinese, and the CGO bindings to Tesseract would cost the
+single static binary and the ~23 MB image.
+
+**It is off by default and does not auto-detect.** Unlike `ebook-convert`,
+OCR takes minutes per book, and silently adding half an hour to a library
+scan because a tool happens to be on `PATH` is not a pleasant surprise:
+
+```bash
+docker run ... -e ZREADER_OCR=1 ...
+```
+
+Results are cached beside the cached EPUB as `<author>/<title>.ocr.pdf` and
+reused until the source file changes, so only the first scan pays the cost.
+A failed or fruitless OCR leaves the book readable as pages — the behaviour
+you get without OCR at all.
+
+The published image does **not** ship ocrmypdf; Tesseract, Ghostscript and
+the Chinese language data together are an order of magnitude larger than
+zreader itself. Layer them on if you want it:
+
+```dockerfile
+FROM leafvmaple/zreader:latest
+USER root
+RUN apk add --no-cache ocrmypdf tesseract-ocr-data-chi_sim
+ENV ZREADER_OCR=1
+```
 
 ### Export for AI
 
