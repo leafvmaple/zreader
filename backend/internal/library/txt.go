@@ -9,6 +9,7 @@ package library
 //	  → DetectMetadata              — by:/作者：scan (this file)
 //	  → FormatText                  — paragraph normalisation, glue split, etc.
 //	  → ParseChapters               — chapter list extraction (this file)
+//	  → StripTableOfContents        — embedded TOC removal (toc_strip.go)
 //
 // ParseChapters runs a tiered scan, one regex per "marker shape":
 //

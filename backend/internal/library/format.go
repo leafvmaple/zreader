@@ -368,12 +368,20 @@ func writeTextSourceToCache(folder, sourcePath string, raw []byte, st os.FileInf
 	formatted := FormatText(text, title, author)
 	formatted = ensureTrailingLF(formatted)
 	chapters := ParseChapters(formatted, nil)
+	sidecar := false
 	if sourcePath != "" {
-		if override, ok, err := chaptersFromSidecar(sourcePath, formatted); err != nil {
+		override, ok, err := chaptersFromSidecar(sourcePath, formatted)
+		if err != nil {
 			return CacheResult{}, err
-		} else if ok {
-			chapters = override
 		}
+		if ok {
+			chapters, sidecar = override, true
+		}
+	}
+	// A sidecar is a hand-written answer to "where do the chapters
+	// start"; contents-block detection must not second-guess it.
+	if !sidecar {
+		formatted, chapters = StripTableOfContents(formatted, chapters)
 	}
 
 	cachedPath := CachedPath(folder, author, title)
