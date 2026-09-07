@@ -16,6 +16,23 @@ function assert(ok, message) {
   if (!ok) throw new Error(message);
 }
 
+// Per-book actions sit behind a "⋯" that is only revealed on hover, so the
+// menu has to be opened before its items can be clicked.
+async function openRowMenu(page, index) {
+  const row = page.locator('.book-row').nth(index);
+  await row.hover();
+  await row.locator('.book-row__more').click();
+  await page.waitForSelector('.shelf__menu-pop');
+}
+
+// Library maintenance (duplicates, job history) lives in the header's
+// overflow menu rather than as top-level buttons.
+async function openHeaderMenu(page, itemText) {
+  await page.locator('.shelf__actions .shelf__menu > button').click();
+  await page.waitForSelector('.shelf__menu-pop');
+  await page.locator('.shelf__menu-pop button', { hasText: itemText }).click();
+}
+
 async function freePort() {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -83,12 +100,18 @@ async function stopServer(proc) {
   });
 }
 
+// A line the AI export's promo rule is expected to strip. Kept synthetic
+// and pointed at a reserved-for-testing domain so the fixture never
+// resembles a real site.
+const PROMO_LINE = '更多精彩小说尽在 www.example-invalid.test，请记住本站域名！';
+
 function longBookText(needle) {
   const paragraphs = [];
   for (let i = 0; i < 80; i += 1) {
     paragraphs.push(`Paragraph ${i}. Alpha beta gamma delta epsilon zeta eta theta.`);
   }
   paragraphs.splice(20, 0, `This paragraph contains ${needle} for search.`);
+  paragraphs.splice(40, 0, PROMO_LINE);
   return `Chapter 1\n\n${paragraphs.join('\n\n')}\n\nChapter 2\n\nTail paragraph.`;
 }
 
@@ -164,15 +187,26 @@ try {
   const uploadPath = path.join(tempRoot, 'BookA - AuthorX.txt');
   await writeFile(uploadPath, longBookText('OldNeedle'), 'utf8');
   await page.getByRole('button', { name: '添加书籍' }).click();
-  assert(await page.locator('.upload-dialog').isVisible(), 'upload dialog did not open');
-  await page.locator('.upload-dialog input[type=file]').setInputFiles(uploadPath);
+  assert(await page.locator('.dlg__panel').isVisible(), 'upload dialog did not open');
+  await page.locator('.dlg input[type=file]').setInputFiles(uploadPath);
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/library/upload') && r.status() === 201),
-    page.locator('.upload-dialog__actions .shelf__btn--primary').click(),
+    page.locator('.dlg__actions .shelf__btn--primary').click(),
   ]);
   await page.waitForSelector('.book-row');
   assert((await page.locator('.book-row').count()) === 1, 'uploaded book row missing');
-  assert((await page.locator('.book-row').first().locator('.book-row__action').count()) === 4, 'book row actions missing');
+
+  // Per-book actions live behind a "⋯" menu; only the favourite star is
+  // direct. A resting row must not expose four buttons, least of all delete.
+  assert(
+    (await page.locator('.book-row').first().locator('.book-row__more').count()) === 1,
+    'per-book overflow menu missing',
+  );
+  await openRowMenu(page, 0);
+  const menuItems = await page.locator('.shelf__menu-pop button').allInnerTexts();
+  assert(menuItems.length === 4, `row menu should hold 4 actions, saw ${menuItems.length}`);
+  assert(/删除/.test(menuItems[3]), 'delete should be the last row action');
+  await page.keyboard.press('Escape');
 
   // P1: toolbar is split into a filter group and an action group.
   assert((await page.locator('.shelf__filters').count()) === 1, 'toolbar filter group missing');
@@ -181,14 +215,14 @@ try {
   // P0: the theme toggle flips data-theme on <html>, persists the choice to
   // localStorage, and round-trips back to the starting theme.
   const themeBefore = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
-  await page.locator('.shelf__btn--theme').click();
+  await page.getByRole('button', { name: /切换到(浅色|深色)/ }).click();
   const themeAfter = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
   assert(themeAfter && themeAfter !== themeBefore, 'theme toggle did not change data-theme');
   assert(
     (await page.evaluate(() => localStorage.getItem('zreader.theme'))) === themeAfter,
     'theme choice was not persisted',
   );
-  await page.locator('.shelf__btn--theme').click();
+  await page.getByRole('button', { name: /切换到(浅色|深色)/ }).click();
   assert(
     (await page.evaluate(() => document.documentElement.getAttribute('data-theme'))) === themeBefore,
     'theme toggle did not round-trip to the starting theme',
@@ -196,7 +230,7 @@ try {
 
   // P1: list <-> grid view toggle, persisted to localStorage.
   assert((await page.locator('.book-list').count()) === 1, 'shelf should default to list view');
-  await page.locator('.shelf__btn--view').click();
+  await page.getByRole('button', { name: /切换到(列表|网格)视图/ }).click();
   await page.waitForSelector('.book-grid');
   assert((await page.locator('.book-card').count()) === 1, 'grid view did not render a card per book');
   assert((await page.locator('.book-list').count()) === 0, 'grid view should replace the list');
@@ -204,36 +238,38 @@ try {
     (await page.evaluate(() => localStorage.getItem('zreader.view'))) === 'grid',
     'view choice was not persisted',
   );
-  await page.locator('.shelf__btn--view').click();
+  await page.getByRole('button', { name: /切换到(列表|网格)视图/ }).click();
   await page.waitForSelector('.book-list');
   assert((await page.locator('.book-grid').count()) === 0, 'view toggle did not return to list');
 
   const secondUploadPath = path.join(tempRoot, 'BookB - AuthorY.txt');
   await writeFile(secondUploadPath, longBookText('OldNeedle'), 'utf8');
   await page.getByRole('button', { name: '添加书籍' }).click();
-  await page.locator('.upload-dialog input[type=file]').setInputFiles(secondUploadPath);
+  await page.locator('.dlg input[type=file]').setInputFiles(secondUploadPath);
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/library/upload') && r.status() === 201),
-    page.locator('.upload-dialog__actions .shelf__btn--primary').click(),
+    page.locator('.dlg__actions .shelf__btn--primary').click(),
   ]);
   await page.waitForFunction(() => document.querySelectorAll('.book-row').length === 2);
 
-  await page.getByRole('button', { name: /重复/ }).click();
+  await openHeaderMenu(page, '重复书籍');
   await page.waitForSelector('.duplicate-list li');
   assert((await page.locator('.duplicate-list li').count()) === 1, 'duplicate panel did not show duplicate group');
   await page.locator('.library-panel__close').click();
 
-  await page.locator('.book-row').first().locator('.book-row__action').nth(0).click();
-  await page.locator('.edit-dialog input').nth(0).fill('EditedTitle');
-  await page.locator('.edit-dialog input').nth(1).fill('EditedAuthor');
-  await page.locator('.edit-dialog input').nth(2).fill('CategoryA');
-  await page.locator('.edit-dialog input').nth(3).fill('TagA TagB');
-  await page.locator('.edit-dialog select').selectOption('reading');
-  await page.locator('.edit-dialog__check input').check();
-  await page.locator('.edit-dialog textarea').fill('Short description');
+  await openRowMenu(page, 0);
+  await page.locator('.shelf__menu-pop button').nth(0).click();
+  await page.waitForSelector('.dlg__panel');
+  await page.locator('.dlg .field input').nth(0).fill('EditedTitle');
+  await page.locator('.dlg .field input').nth(1).fill('EditedAuthor');
+  await page.locator('.dlg .field input').nth(2).fill('CategoryA');
+  await page.locator('.dlg .field input').nth(3).fill('TagA TagB');
+  await page.locator('.dlg .field select').selectOption('reading');
+  await page.locator('.dlg .field--check input').check();
+  await page.locator('.dlg .field textarea').fill('Short description');
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.request().method() === 'PATCH' && r.status() === 200),
-    page.locator('.edit-dialog .shelf__btn--primary').click(),
+    page.locator('.dlg__actions .shelf__btn--primary').click(),
   ]);
   await page.waitForFunction(() => document.body.textContent.includes('EditedTitle'));
   assert(await page.locator('.book-row__tags span', { hasText: 'TagA' }).count() > 0, 'edited tags not visible');
@@ -253,7 +289,7 @@ try {
   ]);
   await page.waitForFunction(() => document.body.textContent.includes('BatchTag'));
 
-  await page.getByRole('button', { name: '任务' }).click();
+  await openHeaderMenu(page, '任务历史');
   await page.waitForSelector('.job-list li');
   assert((await page.locator('.job-list li').count()) > 0, 'job history did not open');
   await page.locator('.library-panel__close').click();
@@ -275,9 +311,10 @@ try {
   const freshText = longBookText('FreshNeedle');
   await writeFile(path.join(libraryDir, 'BookA - AuthorX.txt'), freshText, 'utf8');
   await writeFile(path.join(libraryDir, 'BookB - AuthorY.txt'), freshText, 'utf8');
+  await openRowMenu(page, 0);
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.url().includes('/reparse') && r.status() === 200),
-    page.locator('.book-row').first().locator('.book-row__action').nth(2).click(),
+    page.locator('.shelf__menu-pop button').nth(1).click(),
   ]);
 
   await page.locator('.book-row').first().locator('a.book-row__link').click();
@@ -360,21 +397,67 @@ try {
 
   await page.goto(baseURL, { waitUntil: 'networkidle' });
   await page.waitForSelector('.book-row');
-  page.once('dialog', (dialog) => dialog.accept());
+  // The AI export: rules on by default, live preview, and a download link
+  // carrying the chosen rules. Toggling a rule must actually re-run the
+  // export server-side rather than only relabelling the button.
+  await openRowMenu(page, 0);
+  await page.locator('.shelf__menu-pop button', { hasText: '导出' }).click();
+  await page.waitForSelector('.export__stats');
+  assert(
+    (await page.locator('.export__rule input:checked').count()) === 4,
+    'export should default to every cleaning rule on',
+  );
+  // With every rule on, the planted promo line must be gone from the output.
+  const cleanedHref = await page.locator('.dlg__actions a').getAttribute('href');
+  const cleaned = await page.evaluate(async (href) => (await fetch(href)).text(), cleanedHref);
+  const cleanedLines = cleaned.trim().split('\n');
+  assert(
+    cleanedLines.length > 0 && cleanedLines.every((l) => JSON.parse(l).text !== undefined),
+    'export did not return JSONL chunks',
+  );
+  assert(!cleaned.includes('example-invalid.test'), 'the promo line survived a cleaned export');
+
+  // Turning the rule off must actually re-run the export server-side, not
+  // just relabel the download link — so the same line comes back.
   await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.request().method() === 'DELETE' && r.status() === 204),
-    page.locator('.book-row').first().locator('.book-row__action').nth(3).click(),
+    page.waitForResponse((r) => r.url().includes('/export?preview=1') && r.url().includes('promo=0')),
+    page.locator('.export__rule input').first().uncheck(),
   ]);
+  const rawHref = await page.locator('.dlg__actions a').getAttribute('href');
+  assert(/promo=0/.test(rawHref), `export link did not follow the toggle: ${rawHref}`);
+  const raw = await page.evaluate(async (href) => (await fetch(href)).text(), rawHref);
+  assert(raw.includes('example-invalid.test'), 'disabling the promo rule did not restore the line');
+  await page.keyboard.press('Escape');
+
+  // Delete is a dialog now, not a window.confirm, and it defaults to
+  // record-only: the request must carry source=false unless the box is
+  // ticked. That default is the whole point of the dialog, so gate on it.
+  await openRowMenu(page, 0);
+  await page.locator('.shelf__menu-pop button').nth(3).click();
+  await page.waitForSelector('.dlg__panel');
+  assert(
+    !(await page.locator('.confirm-check input').isChecked()),
+    'delete dialog must not default to removing the source file',
+  );
+  const [deleteRequest] = await Promise.all([
+    page.waitForRequest((r) => r.url().includes('/api/v1/books/') && r.method() === 'DELETE'),
+    page.waitForResponse((r) => r.url().includes('/api/v1/books/') && r.request().method() === 'DELETE' && r.status() === 204),
+    page.locator('.dlg__actions .shelf__btn--danger').click(),
+  ]);
+  assert(
+    /source=false/.test(deleteRequest.url()),
+    `delete should default to record-only, requested ${deleteRequest.url()}`,
+  );
   await page.waitForFunction(() => document.querySelectorAll('.book-row').length === 1);
 
   await page.setViewportSize({ width: 1280, height: 900 });
   const imagePDFPath = path.join(tempRoot, 'ImageOnly - AuthorX.pdf');
   await writeFile(imagePDFPath, simplePDFBytes('ImageOnly', 'AuthorX'));
   await page.getByRole('button', { name: '添加书籍' }).click();
-  await page.locator('.upload-dialog input[type=file]').setInputFiles(imagePDFPath);
+  await page.locator('.dlg input[type=file]').setInputFiles(imagePDFPath);
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/v1/library/upload') && r.status() === 201),
-    page.locator('.upload-dialog__actions .shelf__btn--primary').click(),
+    page.locator('.dlg__actions .shelf__btn--primary').click(),
   ]);
   await page.waitForFunction(() => document.querySelectorAll('.book-row').length === 2);
   await Promise.all([
