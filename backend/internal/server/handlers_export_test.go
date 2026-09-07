@@ -41,14 +41,18 @@ func TestExportBookUsesChapterCorpusContract(t *testing.T) {
 		t.Fatalf("preview status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var preview struct {
-		Stats  export.Stats          `json:"stats"`
-		Sample []export.CorpusRecord `json:"sample"`
+		Filename string                `json:"filename"`
+		Stats    export.Stats          `json:"stats"`
+		Sample   []export.CorpusRecord `json:"sample"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &preview); err != nil {
 		t.Fatalf("decode preview: %v", err)
 	}
 	if preview.Stats.Records != 2 || len(preview.Sample) != 2 {
 		t.Fatalf("preview = %+v, want one record for each of 2 chapters", preview)
+	}
+	if !strings.HasPrefix(preview.Filename, "corpus-") || !strings.HasSuffix(preview.Filename, ".reader-v1.jsonl") {
+		t.Errorf("preview filename = %q, want an opaque corpus filename", preview.Filename)
 	}
 	for i, record := range preview.Sample {
 		if record.SchemaVersion != export.CorpusSchemaVersion {
@@ -57,6 +61,52 @@ func TestExportBookUsesChapterCorpusContract(t *testing.T) {
 		if record.DocumentID == "" || record.SourceSHA256 == "" || record.CleanedSHA256 == "" {
 			t.Errorf("record %d is missing provenance: %+v", i, record)
 		}
+	}
+}
+
+func TestExportBookUsesOpaqueFilenameAndOptionalContentAnonymity(t *testing.T) {
+	srv, book := exportTestBook(t, "第一章 子丑寅卯\n\n甲乙丙丁，戊己庚辛。\n")
+	router := testRouter(t, srv)
+
+	previewReq := httptest.NewRequest(http.MethodGet,
+		"/api/v1/books/"+itoa(book.ID)+"/export?preview=1&anonymize=1", nil)
+	previewRecorder := httptest.NewRecorder()
+	router.ServeHTTP(previewRecorder, previewReq)
+	if previewRecorder.Code != http.StatusOK {
+		t.Fatalf("preview status = %d body=%s", previewRecorder.Code, previewRecorder.Body.String())
+	}
+	var preview struct {
+		Filename string                `json:"filename"`
+		Sample   []export.CorpusRecord `json:"sample"`
+	}
+	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if len(preview.Sample) != 1 {
+		t.Fatalf("sample records = %d, want 1", len(preview.Sample))
+	}
+	record := preview.Sample[0]
+	if record.Title != record.ChapterID || record.Metadata.Author != "" ||
+		!strings.HasPrefix(record.Metadata.Book, "document-") || !record.Cleaning.Anonymized {
+		t.Errorf("record identity was not anonymized: %+v", record)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet,
+		"/api/v1/books/"+itoa(book.ID)+"/export?anonymize=1", nil)
+	downloadRecorder := httptest.NewRecorder()
+	router.ServeHTTP(downloadRecorder, downloadReq)
+	if downloadRecorder.Code != http.StatusOK {
+		t.Fatalf("download status = %d body=%s", downloadRecorder.Code, downloadRecorder.Body.String())
+	}
+	_, params, err := mime.ParseMediaType(downloadRecorder.Header().Get("Content-Disposition"))
+	if err != nil {
+		t.Fatalf("parse Content-Disposition: %v", err)
+	}
+	if params["filename"] != preview.Filename {
+		t.Errorf("download filename = %q, preview advertised %q", params["filename"], preview.Filename)
+	}
+	if strings.Contains(downloadRecorder.Header().Get("Content-Disposition"), book.Title) {
+		t.Errorf("Content-Disposition leaked the book title: %q", downloadRecorder.Header().Get("Content-Disposition"))
 	}
 }
 

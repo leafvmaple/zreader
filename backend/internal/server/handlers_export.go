@@ -75,20 +75,24 @@ func (s *Server) handleExportBook(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Logger.Printf("export: %v (using built-in rules)", ruleErr)
 	}
 
-	rulesSelection := parseRules(r)
+	options := export.CorpusOptions{
+		Rules:     parseRules(r),
+		Anonymize: boolParam(r, "anonymize", false),
+	}
 	meta := export.Meta{Title: book.Title}
 	if book.Author.Valid {
 		meta.Author = book.Author.String
 	}
 
-	records, stats := export.BuildCorpus(meta, chapters, view.Text, rulesSelection, rules)
+	records, stats := export.BuildCorpus(meta, chapters, view.Text, options, rules)
+	filename := export.CorpusFilename(view.Text)
 
 	if r.URL.Query().Get("preview") != "" {
 		head := records
 		if len(head) > previewRecords {
 			head = head[:previewRecords]
 		}
-		out := map[string]any{"stats": stats, "sample": head}
+		out := map[string]any{"filename": filename, "stats": stats, "sample": head}
 		if ruleErr != nil {
 			out["rules_warning"] = ruleErr.Error()
 		}
@@ -103,7 +107,7 @@ func (s *Server) handleExportBook(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Disposition", contentDisposition(book.Title+".jsonl"))
+	w.Header().Set("Content-Disposition", contentDisposition(filename))
 	if err := export.WriteCorpusJSONL(w, records); err != nil {
 		// Headers are already out; the truncated body is the only signal
 		// available, so just record it.

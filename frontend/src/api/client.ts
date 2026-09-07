@@ -322,25 +322,26 @@ export async function deleteBookmark(bookId: number, bookmarkId: number): Promis
 
 // --- Cleaned export ---------------------------------------------------------
 
-function exportParams(rules: ExportRules): string {
+function exportParams(rules: ExportRules, anonymize: boolean): string {
   return new URLSearchParams({
     promo: rules.promo ? '1' : '0',
     edges: rules.edges ? '1' : '0',
     normalise: rules.normalise ? '1' : '0',
     notes: rules.notes ? '1' : '0',
+    anonymize: anonymize ? '1' : '0',
   }).toString();
 }
 
 /** Statistics plus the first few chapters, so the dialog can show what a
  *  given rule combination would actually strip before committing. */
-export async function previewExport(id: number, rules: ExportRules): Promise<ExportPreview> {
-  return request<ExportPreview>(`/api/v1/books/${id}/export?preview=1&${exportParams(rules)}`);
+export async function previewExport(id: number, rules: ExportRules, anonymize: boolean): Promise<ExportPreview> {
+  return request<ExportPreview>(`/api/v1/books/${id}/export?preview=1&${exportParams(rules, anonymize)}`);
 }
 
 /** The download URL. Same origin with Content-Disposition, so a plain
  *  anchor is enough — no blob juggling. */
-export function exportURL(id: number, rules: ExportRules): string {
-  return `/api/v1/books/${id}/export?${exportParams(rules)}`;
+export function exportURL(id: number, rules: ExportRules, anonymize: boolean): string {
+  return `/api/v1/books/${id}/export?${exportParams(rules, anonymize)}`;
 }
 
 // --- Reading fonts ----------------------------------------------------------

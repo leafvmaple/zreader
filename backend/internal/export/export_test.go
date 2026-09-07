@@ -324,7 +324,7 @@ func TestBuildCorpus_EmitsOneVersionedRecordPerChapter(t *testing.T) {
 		Meta{Title: "示例书", Author: "佚名"},
 		chapters,
 		flat,
-		allRules().Rules,
+		CorpusOptions{Rules: allRules().Rules},
 		nil,
 	)
 
@@ -375,8 +375,8 @@ func TestBuildCorpus_CleaningChangesOnlyCleanedHash(t *testing.T) {
 	flat, chapters := buildFixture(t,
 		[]string{"第一章　子丑寅卯", "甲乙丙丁。。。戊己庚辛。"},
 	)
-	cleaned, _ := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, Rules{Normalise: true}, nil)
-	raw, _ := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, Rules{}, nil)
+	cleaned, _ := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, CorpusOptions{Rules: Rules{Normalise: true}}, nil)
+	raw, _ := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, CorpusOptions{}, nil)
 
 	if cleaned[0].ID != raw[0].ID || cleaned[0].DocumentID != raw[0].DocumentID ||
 		cleaned[0].SourceSHA256 != raw[0].SourceSHA256 {
@@ -387,11 +387,53 @@ func TestBuildCorpus_CleaningChangesOnlyCleanedHash(t *testing.T) {
 	}
 }
 
+func TestBuildCorpus_AnonymizesDisplayIdentityOnly(t *testing.T) {
+	flat, chapters := buildFixture(t,
+		[]string{"第一章　子丑寅卯", "甲乙丙丁，戊己庚辛。"},
+	)
+	meta := Meta{Title: "示例书", Author: "佚名"}
+	plain, _ := BuildCorpus(meta, chapters, flat, CorpusOptions{}, nil)
+	anonymized, _ := BuildCorpus(meta, chapters, flat, CorpusOptions{Anonymize: true}, nil)
+
+	if len(anonymized) != 1 {
+		t.Fatalf("got %d records, want 1", len(anonymized))
+	}
+	got := anonymized[0]
+	if got.Title != got.ChapterID {
+		t.Errorf("anonymized title = %q, want %q", got.Title, got.ChapterID)
+	}
+	wantBook := "document-" + strings.TrimPrefix(got.DocumentID, "sha256:")[:12]
+	if got.Metadata.Book != wantBook || got.Metadata.Author != "" {
+		t.Errorf("anonymized metadata = %+v, want book %q and no author", got.Metadata, wantBook)
+	}
+	if !got.Cleaning.Anonymized {
+		t.Error("anonymized export did not record its identity transform")
+	}
+	if got.Text != plain[0].Text || got.ID != plain[0].ID || got.SourceSHA256 != plain[0].SourceSHA256 ||
+		got.CleanedSHA256 != plain[0].CleanedSHA256 {
+		t.Error("anonymizing display identity changed content or provenance")
+	}
+}
+
+func TestCorpusFilename_IsStableAndOpaque(t *testing.T) {
+	flat := "第一章\n\n甲乙丙丁。"
+	got := CorpusFilename(flat)
+	if got != CorpusFilename(flat) {
+		t.Fatal("same source produced different corpus filenames")
+	}
+	if !strings.HasPrefix(got, "corpus-") || !strings.HasSuffix(got, ".reader-v1.jsonl") {
+		t.Errorf("CorpusFilename() = %q", got)
+	}
+	if strings.Contains(got, "第一章") {
+		t.Errorf("CorpusFilename() leaked source text: %q", got)
+	}
+}
+
 func TestBuildCorpus_ReportsReplacementCharacterAndGenericStructure(t *testing.T) {
 	flat, chapters := buildFixture(t,
 		[]string{"正文", "甲乙丙丁。\uFFFD"},
 	)
-	records, stats := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, Rules{}, nil)
+	records, stats := BuildCorpus(Meta{Title: "示例书"}, chapters, flat, CorpusOptions{}, nil)
 
 	if stats.ReplacementCharacters != 1 {
 		t.Errorf("replacement characters = %d, want 1", stats.ReplacementCharacters)

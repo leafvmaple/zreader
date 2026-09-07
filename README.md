@@ -221,7 +221,7 @@ Each line is one complete chapter with deterministic identity, the selected
 cleaning passes, and source/cleaned hashes:
 
 ```json
-{"schema_version":1,"id":"sha256:…/chapter-0003","document_id":"sha256:…","chapter_id":"chapter-0003","chapter_index":3,"title":"第三章 起","text":"…","metadata":{"book":"BookA","author":"AuthorX"},"cleaning":{"promo":true,"edge_lines":true,"normalise":true,"author_notes":true},"offset":8412,"chars":1873,"source_sha256":"…","cleaned_sha256":"…"}
+{"schema_version":1,"id":"sha256:…/chapter-0003","document_id":"sha256:…","chapter_id":"chapter-0003","chapter_index":3,"title":"第三章 起","text":"…","metadata":{"book":"BookA","author":"AuthorX"},"cleaning":{"promo":true,"edge_lines":true,"normalise":true,"author_notes":true,"anonymized":false},"offset":8412,"chars":1873,"source_sha256":"…","cleaned_sha256":"…"}
 ```
 
 `offset` is a rune offset into the book's own text — the same coordinate the
@@ -229,6 +229,12 @@ reader and the progress API use — so a record can be traced back to a reading
 position. Model-specific token splitting belongs downstream; the reader keeps
 the neutral corpus at chapter granularity. A source containing Unicode
 replacement characters is reported in preview and blocked from download.
+
+Downloads always use a stable opaque filename such as
+`corpus-0123456789ab.reader-v1.jsonl`, derived from the source hash instead of
+the title or author. Add `anonymize=1` to also replace the book, author, and
+chapter display metadata with stable opaque values; content and provenance
+hashes stay unchanged.
 
 Four cleaning passes run by default, each switchable via a query parameter
 (`promo`, `edges`, `normalise`, `notes`; `0` disables):

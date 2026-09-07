@@ -23,6 +23,7 @@ const DEFAULT_RULES: ExportRules = { promo: true, edges: true, normalise: true, 
 
 export function ExportDialog({ book, onClose }: { book: Book; onClose: () => void }) {
   const [rules, setRules] = useState<ExportRules>(DEFAULT_RULES);
+  const [anonymize, setAnonymize] = useState(false);
   const [preview, setPreview] = useState<ExportPreview | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +35,7 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
     setBusy(true);
     const timer = setTimeout(() => {
       api
-        .previewExport(book.id, rules)
+        .previewExport(book.id, rules, anonymize)
         .then((p) => {
           if (cancelled) return;
           setPreview(p);
@@ -53,7 +54,7 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [book.id, rules]);
+  }, [anonymize, book.id, rules]);
 
   const toggle = useCallback((key: keyof ExportRules) => {
     setRules((r) => ({ ...r, [key]: !r[key] }));
@@ -62,7 +63,7 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
   const stats = preview?.stats;
   const removed = stats ? stats.chars_in - stats.chars_out : 0;
   const removedPct = stats && stats.chars_in > 0 ? Math.round((removed / stats.chars_in) * 1000) / 10 : 0;
-  const canDownload = Boolean(preview && stats?.replacement_characters === 0);
+  const canDownload = Boolean(!busy && preview && stats?.replacement_characters === 0);
 
   return (
     <Dialog
@@ -75,8 +76,8 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
           </button>
           <a
             className={`shelf__btn shelf__btn--primary${canDownload ? '' : ' is-disabled'}`}
-            href={canDownload ? api.exportURL(book.id, rules) : undefined}
-            download={`${book.title}.jsonl`}
+            href={canDownload ? api.exportURL(book.id, rules, anonymize) : undefined}
+            download={preview?.filename}
             aria-disabled={!canDownload}
           >
             下载 JSONL
@@ -100,6 +101,19 @@ export function ExportDialog({ book, onClose }: { book: Book; onClose: () => voi
               </span>
             </label>
           ))}
+        </div>
+      </div>
+
+      <div className="export__section">
+        <span className="export__label">隐私</span>
+        <div className="export__rules">
+          <label className={`export__rule${anonymize ? ' is-on' : ''}`}>
+            <input type="checkbox" checked={anonymize} onChange={() => setAnonymize((value) => !value)} />
+            <span>
+              匿名化语料身份
+              <small>文件名始终使用稳定哈希；开启后同时隐藏书名、作者和原始章节名</small>
+            </span>
+          </label>
         </div>
       </div>
 

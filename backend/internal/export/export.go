@@ -93,7 +93,15 @@ type CleaningReport struct {
 	EdgeLines   bool     `json:"edge_lines"`
 	Normalise   bool     `json:"normalise"`
 	AuthorNotes bool     `json:"author_notes"`
+	Anonymized  bool     `json:"anonymized"`
 	Warnings    []string `json:"warnings,omitempty"`
+}
+
+// CorpusOptions controls cleaning and whether identifying display metadata is
+// replaced with stable opaque names. Provenance IDs and hashes stay unchanged.
+type CorpusOptions struct {
+	Rules     Rules
+	Anonymize bool
 }
 
 // CorpusRecord is one complete cleaned chapter. IDs are deterministic from
@@ -173,20 +181,26 @@ func Build(meta Meta, chapters []Chapter, flat string, opts Options, rs *RuleSet
 // BuildCorpus runs the same cleaning pipeline as Build but emits one complete
 // record per chapter. It deliberately does not accept a target size: splitting
 // for a particular model belongs in the downstream training pipeline.
-func BuildCorpus(meta Meta, chapters []Chapter, flat string, rules Rules, rs *RuleSet) ([]CorpusRecord, Stats) {
+func BuildCorpus(meta Meta, chapters []Chapter, flat string, opts CorpusOptions, rs *RuleSet) ([]CorpusRecord, Stats) {
 	if rs == nil {
 		rs = DefaultRules()
 	}
 
 	titles := chapterTitles(chapters)
 	sourceParas := splitParagraphs(flat, chapters)
-	cleanedParas, stats := cleanParagraphs(sourceParas, chapters, titles, rules, rs)
+	cleanedParas, stats := cleanParagraphs(sourceParas, chapters, titles, opts.Rules, rs)
 	stats.ReplacementCharacters = strings.Count(flat, "\uFFFD")
 	stats.ChapterStructureWarning = hasGenericChapterStructure(chapters)
 
 	sourceByChapter := sourceTextByChapter(flat, chapters)
 	cleanedByChapter := paragraphsByChapter(cleanedParas)
 	documentID := "sha256:" + hashText(flat)
+	documentName := meta.Title
+	author := meta.Author
+	if opts.Anonymize {
+		documentName = "document-" + strings.TrimPrefix(documentID, "sha256:")[:12]
+		author = ""
+	}
 	records := make([]CorpusRecord, 0, len(chapters))
 	for _, chapter := range chapters {
 		cleaned := cleanedByChapter[chapter.Idx]
@@ -196,11 +210,16 @@ func BuildCorpus(meta Meta, chapters []Chapter, flat string, rules Rules, rs *Ru
 		text := joinParagraphs(cleaned)
 		sourceText := sourceByChapter[chapter.Idx]
 		chapterID := fmt.Sprintf("chapter-%04d", chapter.Idx)
+		title := chapter.Title
+		if opts.Anonymize {
+			title = chapterID
+		}
 		report := CleaningReport{
-			Promo:       rules.Promo,
-			EdgeLines:   rules.EdgeLines,
-			Normalise:   rules.Normalise,
-			AuthorNotes: rules.AuthorNotes,
+			Promo:       opts.Rules.Promo,
+			EdgeLines:   opts.Rules.EdgeLines,
+			Normalise:   opts.Rules.Normalise,
+			AuthorNotes: opts.Rules.AuthorNotes,
+			Anonymized:  opts.Anonymize,
 		}
 		if strings.ContainsRune(sourceText, '\uFFFD') {
 			report.Warnings = []string{"replacement_character"}
@@ -211,9 +230,9 @@ func BuildCorpus(meta Meta, chapters []Chapter, flat string, rules Rules, rs *Ru
 			DocumentID:    documentID,
 			ChapterID:     chapterID,
 			ChapterIndex:  chapter.Idx,
-			Title:         chapter.Title,
+			Title:         title,
 			Text:          text,
-			Metadata:      CorpusMetadata{Book: meta.Title, Author: meta.Author},
+			Metadata:      CorpusMetadata{Book: documentName, Author: author},
 			Cleaning:      report,
 			Offset:        cleaned[0].offset,
 			Chars:         len([]rune(text)),
@@ -223,6 +242,13 @@ func BuildCorpus(meta Meta, chapters []Chapter, flat string, rules Rules, rs *Ru
 	}
 	stats.Records = len(records)
 	return records, stats
+}
+
+// CorpusFilename returns a stable opaque filename derived from the exact
+// source text. Re-exporting with different cleaning or anonymity options keeps
+// the same name, while no title or author reaches download history.
+func CorpusFilename(flat string) string {
+	return fmt.Sprintf("corpus-%s.reader-v%d.jsonl", hashText(flat)[:12], CorpusSchemaVersion)
 }
 
 func cleanParagraphs(paras []para, chapters []Chapter, titles map[int]string, rules Rules, rs *RuleSet) ([]para, Stats) {

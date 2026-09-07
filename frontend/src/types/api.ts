@@ -155,6 +155,7 @@ export type ExportRecord = {
     edge_lines: boolean;
     normalise: boolean;
     author_notes: boolean;
+    anonymized: boolean;
     warnings?: string[];
   };
   offset: number;
@@ -175,6 +176,7 @@ export type ExportStats = {
 };
 
 export type ExportPreview = {
+  filename: string;
   stats: ExportStats;
   sample: ExportRecord[];
   rules_warning?: string;
