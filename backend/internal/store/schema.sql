@@ -127,3 +127,29 @@ CREATE TABLE IF NOT EXISTS library_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_library_jobs_created ON library_jobs(created_at DESC);
+
+-- Accounts and sessions (v0.10).
+--
+-- `user_progress` and `bookmarks` were already keyed by a `user_id` TEXT
+-- column from the start, in single-user mode always the literal "default".
+-- These two tables are what turn that key into a real identity; nothing
+-- about the reading tables had to change.
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT    PRIMARY KEY,
+    username      TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,
+    role          TEXT    NOT NULL DEFAULT 'user',
+    created_at    INTEGER NOT NULL
+);
+
+-- Sessions store a SHA-256 of the cookie value, never the value itself, so
+-- a leaked database cannot be replayed as a set of live logins.
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT    PRIMARY KEY,
+    user_id    TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);

@@ -28,7 +28,9 @@ async function openRowMenu(page, index) {
 // Library maintenance (duplicates, job history) lives in the header's
 // overflow menu rather than as top-level buttons.
 async function openHeaderMenu(page, itemText) {
-  await page.locator('.shelf__actions .shelf__menu > button').click();
+  // The header holds two "⋯"-style menus now — the account menu and this
+  // one — so target by label rather than by position.
+  await page.getByRole('button', { name: '更多' }).click();
   await page.waitForSelector('.shelf__menu-pop');
   await page.locator('.shelf__menu-pop button', { hasText: itemText }).click();
 }
@@ -182,6 +184,26 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
   await page.goto(baseURL, { waitUntil: 'networkidle' });
+
+  // A fresh install is gated on creating the first account, and the library
+  // must not be reachable before that. Doing setup here also covers the
+  // upgrade path: everything after this runs as a signed-in admin.
+  assert(await page.locator('.auth__card').isVisible(), 'first run did not show the setup screen');
+  assert(
+    /第一次启动/.test(await page.locator('.auth__lede').innerText()),
+    'setup screen showed login copy instead of first-run copy',
+  );
+  const apiStatus = await page.evaluate(async () => (await fetch('/api/v1/books')).status);
+  assert(apiStatus === 401, `GET /books before setup = ${apiStatus}, want 401`);
+
+  await page.locator('.auth__card input').nth(0).fill('tester');
+  await page.locator('.auth__card input').nth(1).fill('password123');
+  await page.locator('.auth__card input').nth(2).fill('password123');
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/v1/auth/setup') && r.status() === 201),
+    page.locator('.auth__submit').click(),
+  ]);
+  await page.waitForSelector('.shelf');
   assert(await page.getByRole('button', { name: '添加书籍' }).isVisible(), 'add-book button missing');
 
   const uploadPath = path.join(tempRoot, 'BookA - AuthorX.txt');
@@ -467,6 +489,17 @@ try {
   await page.waitForSelector('.reader__pdf-frame');
   assert((await page.locator('.reader.reader--pdf').count()) === 1, 'pdf-image reader did not open');
   assert(await page.getByText(/1\s*\/\s*1/).isVisible(), 'pdf page counter missing');
+
+  // Signing out must actually close the gate, not just clear the UI. The
+  // account menu lives in the shelf header, and the PDF assertions above
+  // left us in the reader.
+  await page.goto(baseURL, { waitUntil: 'networkidle' });
+  await page.waitForSelector('.shelf');
+  await page.getByRole('button', { name: /^账号：/ }).click();
+  await page.locator('.shelf__menu-pop button', { hasText: '退出登录' }).click();
+  await page.waitForSelector('.auth__card');
+  const afterLogout = await page.evaluate(async () => (await fetch('/api/v1/books')).status);
+  assert(afterLogout === 401, `GET /books after logout = ${afterLogout}, want 401`);
 
   console.log('v0.8 e2e smoke passed');
 } finally {

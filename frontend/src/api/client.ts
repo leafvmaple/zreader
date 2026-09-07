@@ -3,6 +3,8 @@
 // production the backend serves both the SPA and the API on the same origin.
 
 import type {
+  Account,
+  AuthStatus,
   Book,
   Bookmark,
   Chapter,
@@ -18,6 +20,7 @@ import type {
   ExportPreview,
   ExportRules,
   ReadingFont,
+  Role,
   UploadResult,
 } from '../types/api';
 
@@ -44,6 +47,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const data = text ? (JSON.parse(text) as unknown) : undefined;
   if (!res.ok) {
     const err = data as { error?: string; message?: string } | undefined;
+    // A 401 means the session ended underneath us — expired, revoked, or
+    // the password rotated elsewhere. Announce it once, centrally, so the
+    // app can return to the login screen instead of every caller rendering
+    // its own "load failed".
+    if (res.status === 401 && !path.startsWith('/api/v1/auth/')) {
+      window.dispatchEvent(new Event('zreader:unauthenticated'));
+    }
     throw new ApiError(
       res.status,
       err?.error ?? `http_${res.status}`,
@@ -51,6 +61,70 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     );
   }
   return data as T;
+}
+
+// --- Auth -------------------------------------------------------------------
+
+/** The one call that works before signing in; drives which screen renders. */
+export async function authStatus(): Promise<AuthStatus> {
+  return request<AuthStatus>('/api/v1/auth/status');
+}
+
+export async function setupFirstAccount(username: string, password: string): Promise<Account> {
+  const out = await request<{ user: Account }>('/api/v1/auth/setup', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+  return out.user;
+}
+
+export async function login(username: string, password: string): Promise<Account> {
+  const out = await request<{ user: Account }>('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+  return out.user;
+}
+
+export async function logout(): Promise<void> {
+  await request<void>('/api/v1/auth/logout', { method: 'POST' });
+}
+
+export async function changeOwnPassword(current: string, next: string): Promise<void> {
+  await request<{ user: Account }>('/api/v1/auth/password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: current, new_password: next }),
+  });
+}
+
+// --- Accounts (admin) -------------------------------------------------------
+
+export async function listAccounts(): Promise<Account[]> {
+  const out = await request<{ users: Account[] }>('/api/v1/users');
+  return out.users ?? [];
+}
+
+export async function createAccount(username: string, password: string, role: Role): Promise<Account> {
+  const out = await request<{ user: Account }>('/api/v1/users', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, role }),
+  });
+  return out.user;
+}
+
+export async function updateAccount(
+  id: string,
+  patch: { password?: string; role?: Role },
+): Promise<Account> {
+  const out = await request<{ user: Account }>(`/api/v1/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return out.user;
+}
+
+export async function deleteAccount(id: string): Promise<void> {
+  await request<void>(`/api/v1/users/${id}`, { method: 'DELETE' });
 }
 
 // --- Library folders --------------------------------------------------------

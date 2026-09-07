@@ -28,9 +28,10 @@ type Config struct {
 // Server is the typed HTTP server. The handlers/* files hang methods off it
 // so they can reach Store/Logger without a global.
 type Server struct {
-	http  *http.Server
-	cfg   Config
-	store *store.Store
+	http     *http.Server
+	cfg      Config
+	store    *store.Store
+	throttle loginThrottle
 }
 
 // New builds a Server but does not start it. Store is required.

@@ -33,7 +33,7 @@ func TestHandleUploadBooks_SavesAndScans(t *testing.T) {
 	req.Header.Set("Content-Type", contentType)
 	rr := httptest.NewRecorder()
 
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -99,7 +99,7 @@ func TestHandleUploadBooks_OnlyScansUploadedSources(t *testing.T) {
 	req.Header.Set("Content-Type", contentType)
 	rr := httptest.NewRecorder()
 
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -146,7 +146,7 @@ func TestHandleUploadBooks_DoesNotOverwriteExistingSource(t *testing.T) {
 	req.Header.Set("Content-Type", contentType)
 	rr := httptest.NewRecorder()
 
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}

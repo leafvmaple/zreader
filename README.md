@@ -20,7 +20,9 @@ docker run -d \
   leafvmaple/zreader:latest
 ```
 
-Open <http://localhost:8080>, click the scan button, start reading.
+Open <http://localhost:8080>. The first visit asks you to create an admin
+account; everything after that is behind a login. Then click the scan button
+and start reading.
 
 ### Where the image is published
 
@@ -119,18 +121,51 @@ can write to it.
 - Fonts: three system stacks out of the box, no network calls. Extra
   webfonts are opt-in — see [Reading fonts](#reading-fonts).
 - Cleaned export for LLM/RAG use — see [Export for AI](#export-for-ai).
+- Accounts with per-user reading progress and bookmarks, admin/user roles,
+  and session login — see [Accounts](#accounts-and-login).
 - Keyboard: ←/→/PageUp/PageDown/Space turn pages, Home/End jump, Esc closes.
 
 ## What's missing
 
-- No authentication. **Do not expose this to the public internet without a
-  reverse proxy that handles auth** (Caddy / Nginx Basic Auth, Authelia,
-  Tailscale, etc.). Inside your homelab on a trusted network it's fine.
-- Single user. The schema has a `user_id` column but everyone is `default`
-  in this mode.
+- No rate limiting beyond the login endpoint, and no audit log.
+- No password reset by email — an admin resets other people's passwords, and
+  a lost sole-admin password needs the recovery step in
+  [Accounts](#accounts-and-login).
 - Scanned PDFs need an external OCR tool; there is no built-in engine.
 - MOBI/AZW/AZW3 files using HUFF/CDIC compression need Calibre
   `ebook-convert`; the native reader handles the `none` and PalmDOC schemes.
+
+### Accounts and login
+
+Every API route except the health check and the auth endpoints requires a
+session. The first visit to a fresh install shows a setup screen instead of
+the library; the account it creates is an admin.
+
+**Upgrading from v0.9 or earlier:** the first account you create adopts the
+reading progress and bookmarks recorded before accounts existed, so your
+positions carry over. That adoption happens once, for the first account — so
+create yours before handing the URL to anyone else.
+
+Admins manage accounts from the shelf header (the person icon → 用户管理):
+add users, switch roles, remove accounts. Removing an account deletes its
+progress and bookmarks; the library itself is shared and untouched.
+
+Details worth knowing:
+
+- Passwords are bcrypt hashes. Sessions are HttpOnly cookies, stored
+  server-side as a SHA-256 of the token, and last 30 days.
+- Changing a password signs that account out everywhere else.
+- Failed logins are throttled per username after 5 attempts.
+- The last admin cannot be demoted or deleted.
+- The cookie is marked `Secure` when the request arrives over HTTPS,
+  including via `X-Forwarded-Proto` from a reverse proxy. Over plain HTTP it
+  is not, because a `Secure` cookie there would never be sent back.
+
+**Lost the only admin password?** There is no email reset. Stop the
+container, delete the `users` row with any SQLite client
+(`DELETE FROM users;` in `<data>/library.db`), and restart — the setup screen
+comes back. Reading progress survives, since it is keyed by user id and the
+new account re-adopts nothing; back up `library.db` first.
 
 ### OCR for scanned PDFs
 
@@ -324,15 +359,22 @@ the whole app works offline.
 - Destructive actions moved behind an overflow menu; deleting a book no longer
   removes the source file unless you ask it to.
 
-### v0.10 — Users and Safety
+### v0.10 — Users and Safety (implemented)
 
-Goal: make the app safe to share inside a household or small private group.
+Delivered: the app is safe to share inside a household or small private group.
 
-- Built-in authentication.
-- Multi-user progress, bookmarks, notes, and settings.
-- Admin/user roles.
+- Built-in authentication: setup on first run, session login, no anonymous
+  access to anything but the health check.
+- Multi-user progress and bookmarks, already keyed by user id in the schema.
+- Admin/user roles, with account management in the UI.
+- Native MOBI/AZW/AZW3 reading, removing the last external-tool requirement
+  from the default install.
+- Scan failures report why, instead of a bare count.
+
+Still open for a later milestone:
+
 - Database and configuration backup/restore.
-- Hardened reverse-proxy deployment docs and safer defaults.
+- Per-user reader settings (currently per-browser, in localStorage).
 
 ### v1.0 — Stable NAS App
 

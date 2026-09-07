@@ -36,7 +36,7 @@ func TestBookSearchAndBookmarks(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/search?q=target", nil)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("search status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -57,7 +57,7 @@ func TestBookSearchAndBookmarks(t *testing.T) {
 	body := bytes.NewBufferString(`{"char_offset":12,"chapter_idx":1,"note":"mark"}`)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/"+itoa(book.ID)+"/bookmarks", body)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("add bookmark status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -73,7 +73,7 @@ func TestBookSearchAndBookmarks(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/bookmarks", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("list bookmarks status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -93,14 +93,14 @@ func TestBookSearchAndBookmarks(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodDelete, "/api/v1/books/"+itoa(book.ID)+"/bookmarks/"+itoa(added.ID), nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete bookmark status = %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/bookmarks", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("list bookmarks after delete status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -132,7 +132,7 @@ func TestBookDTORedactsInternalPaths(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID), nil)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("get book status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -179,14 +179,14 @@ func TestBookReparseUsesPersistedSourcePath(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+itoa(book.ID)+"/reparse", nil)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("reparse status = %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/search?q=New", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("search status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -226,7 +226,7 @@ func TestDeleteBookRemovesSourceAndRow(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/books/"+itoa(book.ID)+"?source=true", nil)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -265,7 +265,7 @@ func TestDeleteBookMissingSourceConflictKeepsRow(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/books/"+itoa(book.ID)+"?source=true", nil)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("delete missing source status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -320,7 +320,7 @@ func TestImagePDFSourceReaderEndpoints(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/source", nil)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("source status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -333,20 +333,20 @@ func TestImagePDFSourceReaderEndpoints(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/content", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("content status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID)+"/search?q=Alpha", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("search status = %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/api/v1/books/"+itoa(book.ID)+"?source=false", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -378,7 +378,7 @@ func TestDeleteBookRecordOnlyAllowsMissingSource(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/books/"+itoa(book.ID)+"?source=false", nil)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete record-only status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -400,7 +400,7 @@ func uploadTestBook(t *testing.T, srv *Server, name, content string) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/library/upload", body)
 	req.Header.Set("Content-Type", contentType)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("upload status = %d body=%s", rr.Code, rr.Body.String())
 	}

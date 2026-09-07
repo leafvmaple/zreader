@@ -1,6 +1,21 @@
 // Wire shapes returned by the Go backend (see backend/internal/server/handlers_*.go).
 // Keep these field names in lockstep with the JSON tags on the DTO structs.
 
+export type Role = 'admin' | 'user';
+
+export type Account = {
+  id: string;
+  username: string;
+  role: Role;
+  created_at: number;
+};
+
+export type AuthStatus = {
+  /** True until the first account exists; the UI shows setup instead of login. */
+  setup_required: boolean;
+  user?: Account;
+};
+
 export type Folder = {
   id: number;
   path: string;

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import * as api from '../api/client';
 import { BookCover } from '../components/BookCover';
 import { Dialog } from '../components/Dialog';
+import { AccountMenu } from '../components/AccountMenu';
 import { ExportDialog } from '../components/ExportDialog';
 import { useColumnCount, useWindowedList } from '../hooks/useWindowedList';
 import type { Book, DuplicateGroup, Folder, LibraryJob, Progress, ReadingStatus, Tag } from '../types/api';
@@ -835,6 +836,7 @@ export function ShelfPage() {
             >
               <ThemeIcon mode={theme} />
             </button>
+            <AccountMenu />
             <Menu label="更多" badge={duplicates.length}>
               {(close) => (
                 <>

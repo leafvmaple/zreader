@@ -1,0 +1,76 @@
+.account-menu__who {
+  padding: 8px 11px 9px;
+  margin-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.account-menu__who b { font-size: 13px; font-weight: 600; }
+.account-menu__who span { font-size: 11px; color: var(--text-muted); }
+
+.account-menu__note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.account-list {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.account-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.account-list__who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.account-list__who b { font-size: 13px; font-weight: 600; }
+.account-list__who span { font-size: 11px; color: var(--text-muted); }
+
+.account-list__tools { display: flex; align-items: center; gap: 6px; flex: none; }
+
+.account-list__tools select {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 6px;
+}
+
+.account-list__delete {
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.account-list__delete:hover:not(:disabled) { background: var(--danger-weak); }
+.account-list__delete:disabled { color: var(--text-faint); cursor: default; }
+
+.account-new {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.account-new__add { align-self: end; height: 36px; margin-bottom: 12px; }

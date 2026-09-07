@@ -194,15 +194,52 @@ runtime, in the same spirit as the `<name>.chapters.json` sidecar.
   written as a pattern — that's why `collapseRepeatedMarks` is a
   function. A `([！？]){3,}` regex would also fold `？！`, which is wrong.
 
+## Auth — every API route is closed by default
+
+`internal/server/middleware.go` gates all of `/api/` on a session; the only
+exceptions are the health check and the auth endpoints, listed explicitly in
+`publicAPIPaths`. New routes are therefore protected without doing anything
+— which is the right default, since forgetting to add a route to an
+allowlist fails closed, while forgetting to add one to a *deny* list would
+not.
+
+`currentUser(r)` returns the `store.User` attached by that middleware.
+Handlers can rely on it being populated; the zero value only reaches the
+public paths.
+
+**Things that are the way they are on purpose:**
+
+- Sessions are HttpOnly cookies, not tokens in JS. Script cannot read the
+  cookie, which removes the XSS-steals-your-token class entirely. The CSRF
+  trade is covered by `SameSite=Lax` plus every mutating endpoint being
+  JSON-only — a cross-site form post cannot set `Content-Type:
+  application/json`.
+- The database stores a SHA-256 of the session token, never the token, so a
+  leaked `library.db` is not a set of live logins.
+- Login returns one identical response for "no such user" and "wrong
+  password", and the unknown-user path still runs a bcrypt comparison
+  against a dummy hash so both take the same time. Skipping either makes the
+  endpoint a username oracle.
+- `ValidatePassword` caps at 72 **bytes**, which is where bcrypt stops
+  reading. Allowing longer would silently authenticate on a prefix.
+- The first account created adopts rows owned by `store.LegacyUserID`
+  ("default"), which is what every row had before accounts existed. That is
+  how an upgrading install keeps its reading positions.
+
 ## External tools — delegate, don't embed
 
 Two capabilities are delegated to binaries rather than linked in, for the
 same reason: a Go implementation would cost either the CGO-free single
 static binary or a large fraction of the ~23 MB image.
 
+MOBI/AZW/AZW3 used to be on this list and no longer is — `mobi.go` reads
+them directly. The converter survives only as a fallback for HUFF/CDIC
+compression. Prefer that shape when adding a format: native for the common
+case, external tool for the tail.
+
 | Capability      | Tool           | Env                                          |
 | --------------- | -------------- | -------------------------------------------- |
-| MOBI/AZW import | `ebook-convert`| `ZREADER_EBOOK_CONVERT`                      |
+| MOBI HUFF/CDIC  | `ebook-convert`| `ZREADER_EBOOK_CONVERT`                      |
 | Scanned-PDF OCR | `ocrmypdf`     | `ZREADER_OCR`, `ZREADER_OCR_CMD`, `_LANG`, `_TIMEOUT` |
 
 Both follow the same shape: a package-level `run*` var so tests inject a

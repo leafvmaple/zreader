@@ -42,7 +42,7 @@ func TestLibraryManagementMetadataTagsAndReparsePreservesEdits(t *testing.T) {
 	}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/books/"+itoa(book.ID), bytes.NewBufferString(patch))
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("patch status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -76,14 +76,14 @@ func TestLibraryManagementMetadataTagsAndReparsePreservesEdits(t *testing.T) {
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/"+itoa(book.ID)+"/reparse", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("reparse status = %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+itoa(book.ID), nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("get status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -106,7 +106,7 @@ func TestLibraryManagementMetadataTagsAndReparsePreservesEdits(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/library/tags", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("list tags status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -150,7 +150,7 @@ func TestLibraryManagementDuplicatesBatchAndJobs(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/duplicates", nil)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("duplicates status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -171,7 +171,7 @@ func TestLibraryManagementDuplicatesBatchAndJobs(t *testing.T) {
 	batch := `{"action":"tag","book_ids":[` + itoa(books[0].ID) + `,` + itoa(books[1].ID) + `],"tags":["BatchTag"]}`
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/batch", bytes.NewBufferString(batch))
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("batch tag status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -191,7 +191,7 @@ func TestLibraryManagementDuplicatesBatchAndJobs(t *testing.T) {
 	statusBody := `{"action":"status","book_ids":[` + itoa(books[0].ID) + `,` + itoa(books[1].ID) + `],"reading_status":"finished"}`
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/batch", bytes.NewBufferString(statusBody))
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("batch status status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -199,14 +199,14 @@ func TestLibraryManagementDuplicatesBatchAndJobs(t *testing.T) {
 	emptyTagBody := `{"action":"tag","book_ids":[` + itoa(books[0].ID) + `],"tags":["  "]}`
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/batch", strings.NewReader(emptyTagBody))
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("empty batch tag status = %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/library/jobs/"+itoa(firstJobID)+"/retry", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("retry job status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -225,7 +225,7 @@ func TestLibraryManagementDuplicatesBatchAndJobs(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/library/jobs?limit=10", nil)
 	rr = httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("jobs status = %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -249,7 +249,7 @@ func uploadTestBookWithJob(t *testing.T, srv *Server, name, content string) int6
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/library/upload", body)
 	req.Header.Set("Content-Type", contentType)
 	rr := httptest.NewRecorder()
-	srv.newRouter().ServeHTTP(rr, req)
+	testRouter(t, srv).ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("upload status = %d body=%s", rr.Code, rr.Body.String())
 	}

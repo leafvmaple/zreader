@@ -14,6 +14,21 @@ import (
 func (s *Server) newRouter() http.Handler {
 	mux := http.NewServeMux()
 
+	// Auth. Only these and /health are reachable without a session; see
+	// publicAPIPaths in middleware.go.
+	mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("POST /api/v1/auth/setup", s.handleSetup)
+	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/v1/auth/me", s.handleMe)
+	mux.HandleFunc("POST /api/v1/auth/password", s.handleChangeOwnPassword)
+
+	// Account management (admin only)
+	mux.HandleFunc("GET /api/v1/users", s.requireAdmin(s.handleListUsers))
+	mux.HandleFunc("POST /api/v1/users", s.requireAdmin(s.handleCreateUser))
+	mux.HandleFunc("PATCH /api/v1/users/{id}", s.requireAdmin(s.handlePatchUser))
+	mux.HandleFunc("DELETE /api/v1/users/{id}", s.requireAdmin(s.handleDeleteUser))
+
 	// Health + identity
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
@@ -24,7 +39,7 @@ func (s *Server) newRouter() http.Handler {
 			"app":     "zreader",
 			"version": s.cfg.Version,
 			"time":    time.Now().UTC().Format(time.RFC3339),
-			"user":    map[string]string{"id": u.ID},
+			"user":    map[string]string{"id": u.ID, "username": u.Username, "role": u.Role},
 		})
 	})
 
@@ -79,7 +94,7 @@ func (s *Server) newRouter() http.Handler {
 		spa.ServeHTTP(w, r)
 	})
 
-	return logRequests(s, withUser(mux))
+	return logRequests(s, s.requireAuth(mux))
 }
 
 // writeJSON sends v as JSON with the given status. Errors during encoding are
