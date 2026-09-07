@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
 import { BookCover } from '../components/BookCover';
@@ -93,6 +93,114 @@ function ViewIcon({ mode }: { mode: ViewMode }) {
   );
 }
 
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M20.5 20.5L16 16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SortIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 4v16m0 0l-3-3.5M7 20l3-3.5M17 20V4m0 0l-3 3.5M17 4l3 3.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Menu is the popover behind the header's "⋯" button. It closes on
+// outside click, on Escape, and after any item fires — the three ways a
+// user expects to dismiss a menu — so the callers stay one-liners.
+function Menu({
+  label,
+  badge,
+  children,
+}: {
+  label: string;
+  badge?: number;
+  children: (close: () => void) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: globalThis.MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="shelf__menu" ref={ref}>
+      <button
+        type="button"
+        className={`shelf__btn shelf__btn--icon shelf__btn--ghost${open ? ' is-open' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={label}
+      >
+        <MoreIcon />
+        {badge !== undefined && badge > 0 && <span className="shelf__badge">{badge}</span>}
+      </button>
+      {open && (
+        <div className="shelf__menu-pop" role="menu">
+          {children(close)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// STATUS_FILTERS is the chip row's order — "all" first, then the
+// reading-status lifecycle, then favourites, which is a different axis
+// and so sits last.
+const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'reading', label: '在读' },
+  { key: 'unread', label: '未读' },
+  { key: 'finished', label: '已读完' },
+  { key: 'paused', label: '搁置' },
+  { key: 'favorite', label: '收藏' },
+];
+
 const STATUS_LABELS: Record<ReadingStatus, string> = {
   unread: '未读',
   reading: '在读',
@@ -154,6 +262,15 @@ export function ShelfPage() {
   const [editMsg, setEditMsg] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(currentTheme);
   const [view, setView] = useState<ViewMode>(loadView);
+  // Drives the sticky header's divider — see .shelf__header.is-stuck.
+  const [stuck, setStuck] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setStuck(window.scrollY > 4);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -551,59 +668,42 @@ export function ShelfPage() {
 
   return (
     <main className="shelf">
-      <header className="shelf__header">
-        <div className="shelf__title">
-          <h1>zreader</h1>
-          <span className="shelf__count">{books.length} 本</span>
-        </div>
-        <div className="shelf__toolbar">
-          <div className="shelf__filters">
+      <header className={`shelf__header${stuck ? ' is-stuck' : ''}`}>
+        <div className="shelf__bar">
+          <div className="shelf__title">
+            <h1>zreader</h1>
+            <span className="shelf__count">{books.length} 本</span>
+          </div>
+
+          <div className="shelf__search-wrap">
+            <SearchIcon />
             <input
               type="search"
-              placeholder="搜索书名 / 作者"
+              placeholder="搜索书名 / 作者 / 标签"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="shelf__search"
+              aria-label="搜索"
             />
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-              className="shelf__sort"
-              aria-label="排序方式"
-            >
-              <option value="recent">最近阅读</option>
-              <option value="added">最近添加</option>
-              <option value="title">按书名</option>
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-              className="shelf__sort"
-              aria-label="阅读状态"
-            >
-              <option value="all">全部状态</option>
-              <option value="favorite">收藏</option>
-              <option value="unread">未读</option>
-              <option value="reading">在读</option>
-              <option value="finished">已读完</option>
-              <option value="paused">搁置</option>
-            </select>
-            <select
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
-              className="shelf__sort"
-              aria-label="标签筛选"
-            >
-              <option value="">全部标签</option>
-              {tags.map((tag) => (
-                <option key={tag.id} value={tag.name}>{tag.name}</option>
-              ))}
-            </select>
           </div>
+
           <div className="shelf__actions">
             <button
               type="button"
-              className="shelf__btn shelf__btn--icon shelf__btn--ghost shelf__btn--view"
+              className="shelf__btn shelf__btn--icon shelf__btn--ghost"
+              onClick={() => {
+                setUploadOpen(true);
+                setUploadMsg(null);
+              }}
+              disabled={uploadBusy}
+              aria-label="添加书籍"
+              title="添加书籍"
+            >
+              <PlusIcon />
+            </button>
+            <button
+              type="button"
+              className="shelf__btn shelf__btn--icon shelf__btn--ghost"
               onClick={toggleView}
               aria-label={view === 'grid' ? '切换到列表视图' : '切换到网格视图'}
               title={view === 'grid' ? '切换到列表视图' : '切换到网格视图'}
@@ -612,42 +712,86 @@ export function ShelfPage() {
             </button>
             <button
               type="button"
-              className="shelf__btn shelf__btn--icon shelf__btn--ghost shelf__btn--theme"
+              className="shelf__btn shelf__btn--icon shelf__btn--ghost"
               onClick={toggleTheme}
               aria-label={theme === 'dark' ? '切换到浅色' : '切换到深色'}
               title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
             >
               <ThemeIcon mode={theme} />
             </button>
-            <button
-              type="button"
-              className="shelf__btn shelf__btn--ghost"
-              onClick={() => setShowDuplicates((v) => !v)}
-            >
-              重复{duplicates.length > 0 ? ` ${duplicates.length}` : ''}
-            </button>
-            <button
-              type="button"
-              className="shelf__btn shelf__btn--ghost"
-              onClick={() => setShowJobs((v) => !v)}
-            >
-              任务
-            </button>
-            <span className="shelf__divider" aria-hidden="true" />
-            <button
-              onClick={() => {
-                setUploadOpen(true);
-                setUploadMsg(null);
-              }}
-              disabled={uploadBusy}
-              className="shelf__btn"
-            >
-              添加书籍
-            </button>
+            <Menu label="更多" badge={duplicates.length}>
+              {(close) => (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowDuplicates((v) => !v);
+                      close();
+                    }}
+                  >
+                    重复书籍
+                    {duplicates.length > 0 && <span className="shelf__menu-count">{duplicates.length}</span>}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowJobs((v) => !v);
+                      close();
+                    }}
+                  >
+                    任务历史
+                  </button>
+                </>
+              )}
+            </Menu>
             <button onClick={onScan} disabled={scanBusy} className="shelf__btn shelf__btn--primary">
               {scanBusy ? '扫描中…' : '扫描书库'}
             </button>
           </div>
+        </div>
+
+        {/* Filters as a single scrollable chip row: one tap to switch,
+            and the whole row costs one line instead of the three stacked
+            <select>s it replaces — which is what used to push every book
+            below the fold on a phone. */}
+        <div className="shelf__filters">
+          <div className="shelf__chips" role="group" aria-label="筛选">
+            {STATUS_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                className={`chip${statusFilter === f.key ? ' is-active' : ''}`}
+                onClick={() => setStatusFilter(f.key)}
+                aria-pressed={statusFilter === f.key}
+              >
+                {f.label}
+                {f.key === 'all' && <span className="chip__count">{books.length}</span>}
+              </button>
+            ))}
+            {tags.length > 0 && <span className="shelf__chip-divider" aria-hidden="true" />}
+            {tags.map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                className={`chip chip--tag${tagFilter === tag.name ? ' is-active' : ''}`}
+                onClick={() => setTagFilter((cur) => (cur === tag.name ? '' : tag.name))}
+                aria-pressed={tagFilter === tag.name}
+              >
+                {tag.name}
+              </button>
+            ))}
+          </div>
+
+          <label className="shelf__sort">
+            <SortIcon />
+            <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="排序方式">
+              <option value="recent">最近阅读</option>
+              <option value="added">最近添加</option>
+              <option value="title">按书名</option>
+            </select>
+          </label>
         </div>
       </header>
 

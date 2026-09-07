@@ -373,15 +373,20 @@ func (s *Store) booksByHash(ctx context.Context, hash string) ([]Book, error) {
 	return out, rows.Err()
 }
 
+// coverPalette is the hue set generated covers are drawn from. Hues are
+// spread wide so two books next to each other stay distinguishable, but
+// saturation is held near 12% and lightness near 47%: enough colour to
+// identify a book at a glance, low enough not to glare off a shelf of
+// forty of them, and dark enough that white title text clears 4.5:1.
 var coverPalette = []string{
-	"#4f6f52",
-	"#8a5a44",
-	"#3f6f8f",
-	"#7a5a8f",
-	"#8f5f4a",
-	"#596070",
-	"#4f7a78",
-	"#8a6f3f",
+	"#6b7f76", // sage
+	"#7d7367", // taupe
+	"#6b7a8a", // slate
+	"#7b7286", // plum
+	"#87766b", // clay
+	"#6f7780", // graphite
+	"#66807b", // teal grey
+	"#847c66", // olive sand
 }
 
 // DefaultCover returns deterministic default-cover fields for a book.

@@ -4,79 +4,293 @@
   padding: 32px 28px 64px;
 }
 
+/* --- Header --------------------------------------------------------------
+ *
+ * Two rows, both cheap in vertical space: an identity/search/actions bar
+ * and a filter chip row. The whole thing sticks, so search and the scan
+ * button stay reachable however far down the shelf you are. */
+
 .shelf__header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: -32px -28px 20px;
+  padding: 14px 28px 0;
+  background: color-mix(in srgb, var(--bg), transparent 18%);
+  backdrop-filter: saturate(160%) blur(12px);
+  border-bottom: 1px solid transparent;
+  transition: border-color 120ms ease;
+}
+
+/* Only draw the separating line once the page is actually scrolled —
+ * a permanent rule under a header that starts flush with the content
+ * reads as a stray divider. */
+.shelf__header.is-stuck { border-bottom-color: var(--border); }
+
+.shelf__bar {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
+  align-items: center;
   gap: 16px;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
 }
 
 .shelf__title {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: 8px;
+  flex: none;
 }
 
 .shelf__title h1 {
   margin: 0;
-  font-size: 26px;
-  letter-spacing: 0.02em;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .shelf__count {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
-.shelf__toolbar {
+.shelf__search-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 420px;
   display: flex;
-  gap: 14px;
   align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
-.shelf__filters,
+.shelf__search-wrap svg {
+  position: absolute;
+  left: 11px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.shelf__search {
+  width: 100%;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0 12px 0 34px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.shelf__search:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-weak);
+}
+
+.shelf__search::-webkit-search-cancel-button { cursor: pointer; }
+
 .shelf__actions {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   align-items: center;
-  flex-wrap: wrap;
+  margin-left: auto;
+  flex: none;
 }
 
-.shelf__divider {
-  width: 1px;
-  align-self: stretch;
-  min-height: 22px;
-  background: var(--border);
-  margin: 0 2px;
-}
-
-.shelf__search,
-.shelf__sort,
 .shelf__btn {
   height: 36px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface);
-  padding: 0 12px;
+  padding: 0 14px;
   font: inherit;
+  font-size: 14px;
   color: var(--text);
-}
-
-.shelf__search { min-width: 220px; }
-
-.shelf__btn {
   cursor: pointer;
+  white-space: nowrap;
   transition: transform 80ms ease, background 80ms ease;
 }
 
 .shelf__btn:hover { background: var(--hover); }
 .shelf__btn:active { transform: translateY(1px); }
 
+.shelf__btn--primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: transparent;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.shelf__btn--primary:hover { background: var(--accent-strong); }
+
+.shelf__btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.shelf__btn--ghost:hover,
+.shelf__btn--ghost.is-open {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.shelf__btn:disabled { opacity: 0.6; cursor: progress; }
+
+/* --- Overflow menu ------------------------------------------------------- */
+
+.shelf__menu { position: relative; }
+
+.shelf__badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+.shelf__menu-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 168px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.shelf__menu-pop button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shelf__menu-pop button:hover { background: var(--hover); }
+
+.shelf__menu-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* --- Filter chips -------------------------------------------------------- */
+
+.shelf__filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.shelf__chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Fade the right edge so a clipped chip reads as "more this way"
+   * rather than as a rendering bug. */
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+
+.shelf__chips::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  border: 1px solid transparent;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 80ms ease, color 80ms ease;
+}
+
+.chip:hover { color: var(--text); }
+
+.chip.is-active {
+  background: var(--selected);
+  color: var(--selected-fg);
+}
+
+.chip__count {
+  font-size: 11px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip--tag::before {
+  content: '#';
+  opacity: 0.55;
+}
+
+.shelf__chip-divider {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.shelf__sort {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 6px 0 10px;
+  border-radius: 15px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.shelf__sort:hover { background: var(--hover); color: var(--text); }
+
+.shelf__sort select {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.shelf__sort select:focus-visible { outline: 1px solid var(--accent); border-radius: 4px; }
+
 .shelf__btn--icon {
+  position: relative;
   width: 36px;
   padding: 0;
   display: grid;
@@ -85,27 +299,6 @@
 }
 
 .shelf__btn--icon:hover { color: var(--text); }
-
-.shelf__btn--ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-muted);
-}
-
-.shelf__btn--ghost:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-
-.shelf__btn--primary {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: transparent;
-}
-
-.shelf__btn--primary:hover { background: var(--accent-strong); }
-
-.shelf__btn:disabled { opacity: 0.6; cursor: progress; }
 
 .upload-dialog {
   position: fixed;
@@ -123,8 +316,8 @@
   overflow: auto;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+  border-radius: 14px;
+  box-shadow: var(--shadow-pop);
   padding: 18px;
 }
 
@@ -270,7 +463,6 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: var(--shadow);
   margin-bottom: 16px;
 }
 
@@ -397,10 +589,12 @@
 .shelf__section + .shelf__section { margin-top: 32px; }
 
 .shelf__section-title {
-  margin: 0 0 14px;
-  font-size: 16px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
-  font-weight: 500;
+  text-transform: none;
 }
 
 .shelf__empty {
@@ -445,30 +639,37 @@
 
 .shelf__continue {
   display: flex;
-  gap: 14px;
+  gap: 12px;
   overflow-x: auto;
-  padding-bottom: 6px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+  /* Fade rather than shear: a half-visible card at the edge should read
+   * as "scroll for more", not as a clipping bug. */
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
 }
 
+.shelf__continue::-webkit-scrollbar { display: none; }
+
+.continue-card { scroll-snap-align: start; }
+
 .continue-card {
-  flex: 0 0 260px;
+  flex: 0 0 248px;
   display: flex;
   gap: 12px;
   align-items: center;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: var(--shadow);
   padding: 12px 14px;
   text-decoration: none;
   color: inherit;
-  transition: transform 80ms ease, box-shadow 80ms ease, border-color 80ms ease;
+  transition: background 100ms ease, border-color 100ms ease;
 }
 
 .continue-card:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-hover);
-  border-color: var(--accent);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
 }
 
 /* Cover sizing only — the artwork itself lives in BookCover.css. */
@@ -516,7 +717,6 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: var(--shadow);
   overflow: hidden;
 }
 
@@ -697,16 +897,11 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: var(--shadow);
   overflow: hidden;
-  transition: transform 80ms ease, box-shadow 80ms ease, border-color 80ms ease;
+  transition: border-color 100ms ease;
 }
 
-.book-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-hover);
-  border-color: var(--accent);
-}
+.book-card:hover { border-color: var(--border-strong); }
 
 .book-card.is-selected {
   border-color: var(--accent);
@@ -720,9 +915,6 @@
 
 .book-card__cover { width: 100%; }
 
-/* Lift the whole card's art on hover — the shadow transition lives on
- * .book-cover, so this only has to move it. */
-.book-card:hover .book-cover { transform: translateY(-2px); }
 
 .book-card__select {
   position: absolute;
@@ -819,12 +1011,22 @@
 /* --- Responsive ---------------------------------------------------------- */
 
 @media (max-width: 700px) {
-  .shelf__header { flex-direction: column; align-items: stretch; }
-  .shelf__toolbar { justify-content: stretch; gap: 10px; }
-  .shelf__filters { width: 100%; }
-  .shelf__filters .shelf__search { flex: 1 1 100%; min-width: 0; }
-  .shelf__actions { width: 100%; }
-  .shelf__divider { display: none; }
+  .shelf { padding: 16px 14px 56px; }
+
+  /* Phone header: identity + actions on line one, search on line two,
+     chips on line three — around 150px total, so books are on screen
+     without scrolling. */
+  .shelf__header {
+    margin: -16px -14px 14px;
+    padding: 10px 14px 0;
+  }
+
+  .shelf__bar { flex-wrap: wrap; gap: 8px; }
+  .shelf__title { order: 0; }
+  .shelf__actions { order: 1; }
+  .shelf__search-wrap { order: 2; flex-basis: 100%; max-width: none; }
+  .shelf__filters { padding: 10px 0; gap: 8px; }
+  .shelf__btn--primary { padding: 0 11px; }
   .book-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .book-row { grid-template-columns: 1fr; }
   .book-row__select {

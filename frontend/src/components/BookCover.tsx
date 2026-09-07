@@ -8,11 +8,9 @@ import './BookCover.css';
 // EPUB (and converted MOBI/AZW) sources carry real cover art, extracted
 // into the cached EPUB at scan time and served from /books/{id}/cover.
 // Everything else — the TXT novels that make up most of a Chinese
-// library — gets a generated typographic cover instead of the single
-// giant character the shelf used to draw. The generated form is
-// deliberately book-shaped (square spine edge on the left, rounded
-// fore-edge on the right, a spine band and a paper highlight) so a
-// shelf of TXT files still reads as a shelf of books.
+// library — gets a generated cover: a flat field in the book's hashed
+// hue with the title and author set on it, instead of the single giant
+// character the shelf used to draw.
 //
 // `book.has_cover` gates the network request: a library with no EPUBs
 // issues no image requests at all rather than one 404 per book.
@@ -90,7 +88,6 @@ export function BookCover({ book, className }: Props) {
           <div className="book-cover__author">{book.author ?? ''}</div>
         </div>
       )}
-      <div className="book-cover__spine" aria-hidden="true" />
     </div>
   );
 }

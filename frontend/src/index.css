@@ -1,27 +1,51 @@
+/* Design tokens.
+ *
+ * Flat and low-saturation on purpose. This is an app you stare at for
+ * hours, so: no drop shadows on anything that isn't genuinely floating,
+ * 1px hairlines instead of elevation, off-white rather than pure white,
+ * off-black rather than pure black, and a single desaturated accent
+ * that only marks progress and the one primary action. Colour variety
+ * is spent on book covers, where it does identification work — and even
+ * there it stays around 12% saturation. */
+
 :root {
-  /* Light theme (default). The shelf + dialogs read these tokens; the reader
-   * page is self-contained and themes itself via its own --r-* variables. */
-  --bg: #f2f3f6;
+  /* Warm-neutral greys. A slightly warm ground scatters less than a
+   * blue-white one and is easier on the eyes over a long session. */
+  --bg: #f7f7f5;
   --surface: #ffffff;
-  --surface-2: #eceef2;
-  --text: #20242b;
-  --text-muted: #69727e;
-  --border: #e2e6ec;
-  --hover: rgba(20, 30, 50, 0.05);
-  --track: rgba(20, 30, 50, 0.10);
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.07);
-  --shadow-hover: 0 12px 30px rgba(16, 24, 40, 0.16);
+  --surface-2: #efefec;
+  --surface-3: #e7e7e3;
 
-  /* Single brand accent — calm teal that pairs with the warm reading themes
-   * and reads naturally as "amount read" on progress bars. */
-  --accent: #0f7d6e;
-  --accent-strong: #0b5f54;
+  /* Never #000 — pure black on white is the highest-glare pairing
+   * there is. ~86% of the way there reads just as sharp. */
+  --text: #26292c;
+  --text-muted: #767a80;
+  --text-faint: #a0a4aa;
+
+  --border: #e4e4e0;
+  --border-strong: #d3d3ce;
+  --hover: rgba(20, 24, 30, 0.045);
+  --track: rgba(20, 24, 30, 0.09);
+
+  /* The only shadow in the system, for genuinely floating surfaces
+   * (menus, dialogs). Cards use borders. */
+  --shadow-pop: 0 8px 28px rgba(16, 20, 28, 0.13);
+
+  /* Muted sage-teal. Desaturated far enough to sit quietly next to warm
+   * reading themes while still reading as "progress". */
+  --accent: #4a7f70;
+  --accent-strong: #3d6c5f;
   --accent-fg: #ffffff;
-  --accent-weak: rgba(15, 125, 110, 0.10);
+  --accent-weak: rgba(74, 127, 112, 0.11);
 
-  --danger: #c0392b;
-  --danger-weak: #fdecea;
-  --danger-border: #f1c4bf;
+  /* Selection fill for chips and toggles: neutral, not coloured, so the
+   * accent stays reserved for progress and the primary action. */
+  --selected: #2e3236;
+  --selected-fg: #f7f7f5;
+
+  --danger: #a8544a;
+  --danger-weak: rgba(168, 84, 74, 0.09);
+  --danger-border: rgba(168, 84, 74, 0.28);
 
   color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
@@ -31,25 +55,35 @@
 }
 
 :root[data-theme='dark'] {
-  --bg: #1c1e22;
-  --surface: #292c31;
-  --surface-2: #33373d;
-  --text: #e2e5e9;
-  --text-muted: #949ba4;
-  --border: rgba(255, 255, 255, 0.10);
-  --hover: rgba(255, 255, 255, 0.06);
-  --track: rgba(255, 255, 255, 0.12);
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.40);
-  --shadow-hover: 0 12px 30px rgba(0, 0, 0, 0.55);
+  /* Not pure black either: a near-black grey avoids the halation
+   * light text produces against #000 on OLED. */
+  --bg: #17191b;
+  --surface: #1f2225;
+  --surface-2: #282c2f;
+  --surface-3: #32363a;
 
-  --accent: #46b9a6;
-  --accent-strong: #5fc7b6;
-  --accent-fg: #11201d;
-  --accent-weak: rgba(70, 185, 166, 0.16);
+  --text: #dcdfe2;
+  --text-muted: #8d9299;
+  --text-faint: #6a6f75;
 
-  --danger: #e88a82;
-  --danger-weak: rgba(224, 90, 80, 0.14);
-  --danger-border: rgba(224, 90, 80, 0.40);
+  --border: #2b2f33;
+  --border-strong: #3a3f44;
+  --hover: rgba(255, 255, 255, 0.055);
+  --track: rgba(255, 255, 255, 0.10);
+
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.5);
+
+  --accent: #6ba396;
+  --accent-strong: #7db4a7;
+  --accent-fg: #14201d;
+  --accent-weak: rgba(107, 163, 150, 0.15);
+
+  --selected: #e2e5e8;
+  --selected-fg: #1a1d1f;
+
+  --danger: #cf8a80;
+  --danger-weak: rgba(207, 138, 128, 0.13);
+  --danger-border: rgba(207, 138, 128, 0.32);
 
   color-scheme: dark;
 }
@@ -68,15 +102,24 @@ body,
 
 body {
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 a {
   color: var(--accent);
 }
 
+/* One consistent focus ring everywhere, instead of the browser default
+ * fighting each component's own border treatment. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 code {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  background: var(--hover);
+  background: var(--surface-2);
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 0.92em;
