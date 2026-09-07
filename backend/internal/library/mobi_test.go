@@ -80,16 +80,16 @@ func buildMobi(t *testing.T, f mobiFixture) []byte {
 	binary.BigEndian.PutUint32(rec0[20:], mobiLen)
 	binary.BigEndian.PutUint32(rec0[16+12:], uint32(f.encoding))
 	if exth != nil {
-		binary.BigEndian.PutUint32(rec0[16+112:], 0x40)
+		binary.BigEndian.PutUint32(rec0[16+mobiOffEXTHFlags:], 0x40)
 	}
-	binary.BigEndian.PutUint16(rec0[16+226:], uint16(f.extraFlags))
+	binary.BigEndian.PutUint16(rec0[16+mobiOffExtraFlags:], uint16(f.extraFlags))
 
 	rec0 = append(rec0, exth...)
 	// The full name sits after the headers; record its position.
 	nameOff := len(rec0)
 	rec0 = append(rec0, []byte(f.fullName)...)
-	binary.BigEndian.PutUint32(rec0[16+84:], uint32(nameOff))
-	binary.BigEndian.PutUint32(rec0[16+88:], uint32(len(f.fullName)))
+	binary.BigEndian.PutUint32(rec0[16+mobiOffFullName:], uint32(nameOff))
+	binary.BigEndian.PutUint32(rec0[16+mobiOffFullNameLen:], uint32(len(f.fullName)))
 
 	recs := append([][]byte{rec0}, textRecs...)
 
@@ -164,6 +164,33 @@ func writeMobi(t *testing.T, dir, name string, f mobiFixture) string {
 }
 
 // --- Tests -----------------------------------------------------------------
+
+// The MOBI header is a flat run of uint32s, so a parser and a fixture
+// builder that share an offset constant agree even when the constant is
+// wrong — which is how the full-name pair sat eight bytes late without a
+// failing test. Read the fixture back at the literal offsets the format
+// reference gives, so the constants themselves are what is under test.
+func TestMobiFullNameLivesAtSpecOffset(t *testing.T) {
+	raw := buildMobi(t, mobiFixture{
+		text: "<p>甲乙丙。</p>", compression: compressionNone,
+		encoding: 65001, fullName: "示例书",
+	})
+	recs, err := palmRecords(raw)
+	if err != nil {
+		t.Fatalf("palmRecords: %v", err)
+	}
+	rec0 := recs[0]
+
+	const specFullName, specFullNameLen = 68, 72
+	off := int(binary.BigEndian.Uint32(rec0[16+specFullName:]))
+	n := int(binary.BigEndian.Uint32(rec0[16+specFullNameLen:]))
+	if off <= 0 || n <= 0 || off+n > len(rec0) {
+		t.Fatalf("full name at spec offsets is out of range: off=%d len=%d rec0=%d", off, n, len(rec0))
+	}
+	if got := string(rec0[off : off+n]); got != "示例书" {
+		t.Errorf("full name at spec offsets = %q, want 示例书", got)
+	}
+}
 
 func TestReadMobi_PalmDocRoundTrip(t *testing.T) {
 	// Repetition is what exercises the back-reference token; without it the

@@ -49,6 +49,22 @@ const (
 	encryptionNone = 0
 )
 
+// MOBI header field offsets, relative to the "MOBI" magic (MobileRead's
+// MOBI format reference). Named rather than inline because the header is
+// a flat run of uint32s where reading one field late silently returns its
+// neighbour instead of failing: the full-name pair was being read eight
+// bytes past where it lives, so any file whose EXTH carried no title
+// record got a binary-garbage title — and the garbage reached the shelf
+// and the cache filename.
+const (
+	mobiOffEncoding    = 12
+	mobiOffFullName    = 68
+	mobiOffFullNameLen = 72
+	mobiOffFirstImage  = 92
+	mobiOffEXTHFlags   = 112
+	mobiOffExtraFlags  = 226
+)
+
 // MobiBook is the decoded result: the book's text as markup, plus whatever
 // metadata the file declared.
 type MobiBook struct {
@@ -146,7 +162,10 @@ type mobiHeader struct {
 	extraFlags  int
 	fullNameOff int
 	fullNameLen int
-	exthStart   int // 0 when the file has no EXTH block
+	// firstImage is the record index the image records start at; 0 when
+	// the file declares none.
+	firstImage int
+	exthStart  int // 0 when the file has no EXTH block
 }
 
 func parseMobiHeader(rec0 []byte) (mobiHeader, error) {
@@ -177,22 +196,25 @@ func parseMobiHeader(rec0 []byte) (mobiHeader, error) {
 		}
 		return int(binary.BigEndian.Uint32(rec0[16+off:])), true
 	}
-	if v, ok := field(12); ok && v != 0 {
+	if v, ok := field(mobiOffEncoding); ok && v != 0 {
 		h.encoding = v
 	}
-	if v, ok := field(84); ok {
+	if v, ok := field(mobiOffFullName); ok {
 		h.fullNameOff = v
 	}
-	if v, ok := field(88); ok {
+	if v, ok := field(mobiOffFullNameLen); ok {
 		h.fullNameLen = v
 	}
-	if v, ok := field(112); ok && v&0x40 != 0 {
+	if v, ok := field(mobiOffFirstImage); ok {
+		h.firstImage = v
+	}
+	if v, ok := field(mobiOffEXTHFlags); ok && v&0x40 != 0 {
 		h.exthStart = 16 + mobiLen
 	}
-	// Extra-data flags live at MOBI header offset 226 (file offset 242) and
-	// only exist in headers long enough to contain them.
-	if 16+228 <= len(rec0) && mobiLen >= 228 {
-		h.extraFlags = int(binary.BigEndian.Uint16(rec0[16+226:]))
+	// Extra-data flags are a uint16, and only exist in headers long enough
+	// to contain them.
+	if 16+mobiOffExtraFlags+2 <= len(rec0) && mobiLen >= mobiOffExtraFlags+2 {
+		h.extraFlags = int(binary.BigEndian.Uint16(rec0[16+mobiOffExtraFlags:]))
 	}
 	return h, nil
 }
