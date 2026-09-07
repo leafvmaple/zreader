@@ -71,6 +71,8 @@ type MobiBook struct {
 	HTML   string
 	Title  string
 	Author string
+	// Cover is nil when the file embeds none we can serve.
+	Cover *Cover
 }
 
 // ReadMobi decodes the MOBI/AZW/AZW3 file at path.
@@ -104,6 +106,7 @@ func ReadMobi(path string) (*MobiBook, error) {
 	}
 	out := &MobiBook{HTML: html}
 	out.Title, out.Author = mobiMetadata(recs[0], hdr)
+	out.Cover = mobiCover(recs, hdr)
 	return out, nil
 }
 
@@ -377,8 +380,12 @@ func mobiMetadata(rec0 []byte, h mobiHeader) (title, author string) {
 	return strings.TrimSpace(title), strings.TrimSpace(author)
 }
 
-func parseEXTH(b []byte, encoding int) map[int]string {
-	out := map[int]string{}
+// parseEXTHRaw returns each record's payload bytes. Kept separate from
+// parseEXTH because EXTH mixes text records with numeric ones — the cover
+// and thumbnail positions are big-endian uint32s, and running those
+// through a character decoder turns them into mojibake.
+func parseEXTHRaw(b []byte) map[int][]byte {
+	out := map[int][]byte{}
 	if len(b) < 12 || string(b[0:4]) != "EXTH" {
 		return out
 	}
@@ -394,9 +401,18 @@ func parseEXTH(b []byte, encoding int) map[int]string {
 			break
 		}
 		if _, seen := out[typ]; !seen {
-			out[typ] = decodeMobiString(b[pos+8:pos+size], encoding)
+			out[typ] = b[pos+8 : pos+size]
 		}
 		pos += size
+	}
+	return out
+}
+
+func parseEXTH(b []byte, encoding int) map[int]string {
+	raw := parseEXTHRaw(b)
+	out := make(map[int]string, len(raw))
+	for typ, v := range raw {
+		out[typ] = decodeMobiString(v, encoding)
 	}
 	return out
 }

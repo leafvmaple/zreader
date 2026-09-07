@@ -2,7 +2,8 @@ package library
 
 // Cover extraction.
 //
-// EPUB sources almost always embed a cover image; TXT sources never do.
+// EPUB sources almost always embed a cover image; MOBI files usually carry
+// one as a Palm image record (mobi_cover.go); TXT sources never do.
 // The pipeline treats the cover like any other piece of book content:
 // it is pulled out of the source at format time and written into the
 // cached EPUB (epub_export.go), so the cache stays the single source of

@@ -23,6 +23,31 @@ type mobiFixture struct {
 	author      string
 	extraFlags  int
 	recordSize  int
+	// images are appended after the text records, the way a real file
+	// lays them out; firstImage is written into the header to point at
+	// them. Set noFirstImage to leave the header field zero — the shape
+	// converters that never fill it in produce.
+	images       [][]byte
+	noFirstImage bool
+	// coverOffset, when set, is written as EXTH 201: the cover's index
+	// within the image run. fakeCover writes EXTH 203.
+	coverOffset *int
+	fakeCover   bool
+}
+
+// exthEntry serialises one EXTH record.
+func exthEntry(typ int, payload []byte) []byte {
+	e := make([]byte, 8+len(payload))
+	binary.BigEndian.PutUint32(e[0:], uint32(typ))
+	binary.BigEndian.PutUint32(e[4:], uint32(8+len(payload)))
+	copy(e[8:], payload)
+	return e
+}
+
+func exthUint32Entry(typ int, v uint32) []byte {
+	p := make([]byte, 4)
+	binary.BigEndian.PutUint32(p, v)
+	return exthEntry(typ, p)
 }
 
 func buildMobi(t *testing.T, f mobiFixture) []byte {
@@ -49,20 +74,29 @@ func buildMobi(t *testing.T, f mobiFixture) []byte {
 		textRecs = append(textRecs, chunk)
 	}
 
-	// EXTH carrying the author.
-	var exth []byte
+	// EXTH: author plus whatever cover records the case asks for.
+	var entries [][]byte
 	if f.author != "" {
-		a := []byte(f.author)
-		entry := make([]byte, 8+len(a))
-		binary.BigEndian.PutUint32(entry[0:], exthAuthor)
-		binary.BigEndian.PutUint32(entry[4:], uint32(8+len(a)))
-		copy(entry[8:], a)
+		entries = append(entries, exthEntry(exthAuthor, []byte(f.author)))
+	}
+	if f.coverOffset != nil {
+		entries = append(entries, exthUint32Entry(exthCoverOffset, uint32(*f.coverOffset)))
+	}
+	if f.fakeCover {
+		entries = append(entries, exthUint32Entry(exthHasFakeCover, 1))
+	}
+	var exth []byte
+	if len(entries) > 0 {
+		var body []byte
+		for _, e := range entries {
+			body = append(body, e...)
+		}
 		exth = append(exth, []byte("EXTH")...)
 		hdr := make([]byte, 8)
-		binary.BigEndian.PutUint32(hdr[0:], uint32(12+len(entry)))
-		binary.BigEndian.PutUint32(hdr[4:], 1)
+		binary.BigEndian.PutUint32(hdr[0:], uint32(12+len(body)))
+		binary.BigEndian.PutUint32(hdr[4:], uint32(len(entries)))
 		exth = append(exth, hdr...)
-		exth = append(exth, entry...)
+		exth = append(exth, body...)
 		for len(exth)%4 != 0 {
 			exth = append(exth, 0)
 		}
@@ -91,7 +125,12 @@ func buildMobi(t *testing.T, f mobiFixture) []byte {
 	binary.BigEndian.PutUint32(rec0[16+mobiOffFullName:], uint32(nameOff))
 	binary.BigEndian.PutUint32(rec0[16+mobiOffFullNameLen:], uint32(len(f.fullName)))
 
+	if len(f.images) > 0 && !f.noFirstImage {
+		// Record 0 plus the text records; the images follow them.
+		binary.BigEndian.PutUint32(rec0[16+mobiOffFirstImage:], uint32(1+len(textRecs)))
+	}
 	recs := append([][]byte{rec0}, textRecs...)
+	recs = append(recs, f.images...)
 
 	// Palm container: header, offset table, records.
 	out := make([]byte, palmHeaderLen)

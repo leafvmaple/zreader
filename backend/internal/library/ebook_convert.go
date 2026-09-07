@@ -98,7 +98,7 @@ func importMobiToCache(folder, sourcePath string, st os.FileInfo) (CacheResult, 
 	if err != nil {
 		return CacheResult{}, err
 	}
-	cr, err := writeTextSourceToCache(folder, sourcePath, nil, st, enc, text, title, author, nil, hash)
+	cr, err := writeTextSourceToCache(folder, sourcePath, nil, st, enc, text, title, author, book.Cover, hash)
 	cr.SourcePath = sourcePath
 	return cr, err
 }
