@@ -5,8 +5,9 @@ A self-hosted ebook reader. Point it at a directory of `.txt`, `.epub`, `.pdf`,
 parses chapters, and gives you a web reader with cross-device progress sync.
 Single binary, single ~23 MB container.
 
-> Status: **MVP**. TXT, EPUB, text-layer PDF, image-only PDF page viewing, and
-> converter-backed MOBI/AZW/AZW3 import are supported.
+> Status: **MVP**. TXT, EPUB, text-layer PDF, image-only PDF (paged, or
+> searchable with optional OCR), and converter-backed MOBI/AZW/AZW3 import are
+> supported.
 
 ## Quick start
 
@@ -254,12 +255,11 @@ chapter detection for that source.
 
 ## Roadmap
 
-The current release is v0.8: it imports TXT, EPUB, text-layer PDF, image-only
-PDF, and converter-backed MOBI/AZW/AZW3 sources; caches text formats as EPUB;
-parses or overrides chapters; serves text and PDF-page reader modes; syncs
-single-user reading progress; and includes library-management workflows for
-larger shelves. The next milestones focus on users, safety, and deployment
-predictability.
+The current release is v0.9: everything v0.8 imported, plus OCR for scanned
+PDFs, real cover art, a cleaned JSONL export for feeding a book to a language
+model, a reworked shelf and reader, and a shelf that stays responsive at
+several hundred books. The next milestones focus on users, safety, and
+deployment predictability.
 
 ### v0.6 — Daily Reader (implemented)
 
@@ -291,8 +291,8 @@ the filesystem for common tasks.
 Delivered: import success rate and fidelity improved without adding heavyweight
 runtime dependencies to the container.
 
-- Image-only PDF support via a source-backed PDF page reader mode; OCR can be
-  added later.
+- Image-only PDF support via a source-backed PDF page reader mode (OCR landed
+  in v0.9).
 - Better EPUB fidelity for image alt text, list/blockquote/footnote blocks, and
   nested navigation.
 - MOBI/AZW/AZW3 import through optional Calibre `ebook-convert`.
@@ -300,7 +300,29 @@ runtime dependencies to the container.
 - Continued PDF text cleanup: reading order and repeated page header/footer
   filtering.
 
-### v0.9 — Users and Safety
+### v0.9 — Covers, Cleanup, and Scale (implemented)
+
+Delivered: the shelf earns its name, scanned PDFs stop being second-class, and
+the whole app works offline.
+
+- Real cover art: extracted from EPUB (and converted MOBI/AZW) at scan time,
+  lifted out of embedded JPEGs for PDFs, and generated typographically for
+  everything else.
+- OCR for scanned PDFs through optional `ocrmypdf`, routing them into the
+  normal text pipeline so they become searchable and chapter-parsed.
+- Cleaned JSONL export for LLM/RAG use, with pirate-rip debris removed and
+  user-extensible cleaning rules.
+- Flat, low-saturation redesign of the shelf and reader; six reader themes
+  including an eye-care green and a true-black OLED surface, defaulting to
+  whichever matches the shelf.
+- No external requests: reading fonts resolve from the system, with optional
+  self-hosted webfonts from `<data>/fonts`.
+- Reading progress saved when the page is backgrounded, not just on unmount.
+- Windowed shelf rendering, so several hundred books stay responsive.
+- Destructive actions moved behind an overflow menu; deleting a book no longer
+  removes the source file unless you ask it to.
+
+### v0.10 — Users and Safety
 
 Goal: make the app safe to share inside a household or small private group.
 
