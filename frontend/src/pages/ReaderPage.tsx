@@ -75,13 +75,14 @@ const IconChevronRight = () => (
   </Glyph>
 );
 
-type Theme = 'beige' | 'white' | 'grey' | 'dark';
+// 'auto' follows the shelf's own light/dark choice; the rest are
+// explicit surfaces. See resolveTheme.
+type Theme = 'auto' | 'paper' | 'light' | 'green' | 'dark' | 'black';
 type FontSize = 'sm' | 'md' | 'lg' | 'xl';
 type FontFamily = 'system' | 'songti' | 'wenkai';
 type LineHeight = 'compact' | 'normal' | 'loose';
 type ParagraphGap = 'compact' | 'normal' | 'loose';
 type PageWidth = 'narrow' | 'normal' | 'wide';
-type PageMargin = 'compact' | 'normal' | 'wide';
 type IndentMode = 'indent' | 'flush';
 
 type Settings = {
@@ -91,20 +92,37 @@ type Settings = {
   line: LineHeight;
   gap: ParagraphGap;
   width: PageWidth;
-  margin: PageMargin;
   indent: IndentMode;
 };
 
 const DEFAULT_SETTINGS: Settings = {
-  theme: 'grey',
+  theme: 'auto',
   size: 'md',
   font: 'songti',
   line: 'normal',
   gap: 'normal',
   width: 'normal',
-  margin: 'normal',
   indent: 'indent',
 };
+
+const THEME_SWATCHES: { key: Theme; label: string }[] = [
+  { key: 'auto', label: '跟随书架' },
+  { key: 'paper', label: '纸张' },
+  { key: 'light', label: '白' },
+  { key: 'green', label: '护眼绿' },
+  { key: 'dark', label: '夜间' },
+  { key: 'black', label: '纯黑' },
+];
+
+// resolveTheme turns the stored preference into the class the page
+// actually wears. 'auto' reads the shelf's data-theme attribute, so
+// opening a book from a light shelf no longer drops you into a dark
+// reader (and vice versa).
+function resolveTheme(theme: Theme): Exclude<Theme, 'auto'> {
+  if (theme !== 'auto') return theme;
+  if (typeof document === 'undefined') return 'paper';
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'paper';
+}
 
 const FONT_LABELS: Record<FontFamily, string> = {
   system: '系统默认',
@@ -121,13 +139,12 @@ const GAP_LABELS: Record<ParagraphGap, string> = {
   normal: '标准',
   loose: '宽松',
 };
+// One control for the text column. The old build had both 页宽 and 边距,
+// which are the same thing seen from opposite sides — on a wide screen
+// the column width is what moves, on a phone it is the margin. This
+// drives both (see --r-article-width / --r-content-x).
 const WIDTH_LABELS: Record<PageWidth, string> = {
   narrow: '窄',
-  normal: '标准',
-  wide: '宽',
-};
-const MARGIN_LABELS: Record<PageMargin, string> = {
-  compact: '窄',
   normal: '标准',
   wide: '宽',
 };
@@ -141,10 +158,27 @@ const CHUNK = 50_000;
 // adjacent chapter.
 const PREFETCH_TRIGGER = 1.0;
 
+// Themes that existed before the palette was reworked, mapped to their
+// closest survivor. Without this an upgrading user lands on a class that
+// no longer exists and silently gets the stylesheet's fallback colours.
+const LEGACY_THEMES: Record<string, Theme> = {
+  beige: 'paper',
+  white: 'light',
+  grey: 'dark',
+};
+
 function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
+    if (raw) {
+      const stored = JSON.parse(raw) as Partial<Settings> & { margin?: string };
+      // `margin` folded into `width`; drop it rather than let it linger.
+      delete stored.margin;
+      if (stored.theme && LEGACY_THEMES[stored.theme]) {
+        stored.theme = LEGACY_THEMES[stored.theme];
+      }
+      return { ...DEFAULT_SETTINGS, ...stored };
+    }
   } catch {
     /* ignore */
   }
@@ -959,7 +993,7 @@ export function ReaderPage() {
 
   // --- Render -------------------------------------------------------------
 
-  const themeClass = `reader reader--theme-${settings.theme} reader--size-${settings.size} reader--font-${settings.font} reader--line-${settings.line} reader--gap-${settings.gap} reader--width-${settings.width} reader--margin-${settings.margin} reader--indent-${settings.indent}`;
+  const themeClass = `reader reader--theme-${resolveTheme(settings.theme)} reader--size-${settings.size} reader--font-${settings.font} reader--line-${settings.line} reader--gap-${settings.gap} reader--width-${settings.width} reader--indent-${settings.indent}`;
   const currentChapterTitle = chapters.find((c) => c.idx === currentChapter)?.title ?? '';
 
   if (book?.format === 'pdf-image') {
@@ -1346,12 +1380,14 @@ export function ReaderPage() {
               <div className="settings__row">
                 <span className="settings__label">主题</span>
                 <div className="settings__themes">
-                  {(['beige', 'white', 'grey', 'dark'] as Theme[]).map((t) => (
+                  {THEME_SWATCHES.map((t) => (
                     <button
-                      key={t}
-                      className={`theme-swatch theme-swatch--${t}${settings.theme === t ? ' is-active' : ''}`}
-                      onClick={() => setSettings((s) => ({ ...s, theme: t }))}
-                      aria-label={`主题 ${t}`}
+                      key={t.key}
+                      className={`theme-swatch theme-swatch--${t.key}${settings.theme === t.key ? ' is-active' : ''}`}
+                      onClick={() => setSettings((s) => ({ ...s, theme: t.key }))}
+                      aria-label={t.label}
+                      aria-pressed={settings.theme === t.key}
+                      title={t.label}
                     />
                   ))}
                 </div>
@@ -1413,7 +1449,7 @@ export function ReaderPage() {
                 </div>
               </div>
               <div className="settings__row">
-                <span className="settings__label">页宽</span>
+                <span className="settings__label">版面</span>
                 <div className="settings__seg">
                   {(['narrow', 'normal', 'wide'] as PageWidth[]).map((v) => (
                     <button
@@ -1422,20 +1458,6 @@ export function ReaderPage() {
                       onClick={() => setSettings((s) => ({ ...s, width: v }))}
                     >
                       {WIDTH_LABELS[v]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="settings__row">
-                <span className="settings__label">边距</span>
-                <div className="settings__seg">
-                  {(['compact', 'normal', 'wide'] as PageMargin[]).map((v) => (
-                    <button
-                      key={v}
-                      className={settings.margin === v ? 'is-active' : ''}
-                      onClick={() => setSettings((s) => ({ ...s, margin: v }))}
-                    >
-                      {MARGIN_LABELS[v]}
                     </button>
                   ))}
                 </div>

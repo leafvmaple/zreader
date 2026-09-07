@@ -6,16 +6,21 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  --r-bg: #2d3033;
-  --r-fg: #d4d6d8;
-  --r-fg-muted: #888c91;
-  --r-accent: #c5c7ca;
+  --r-bg: #f4efe4;
+  --r-fg: #33291f;
+  --r-fg-muted: #8b7d6c;
+  --r-accent: #7a5a3f;
   --r-line: 1.9;
   --r-para-gap: 1.2em;
   --r-article-width: 720px;
   --r-content-x: 24px;
   --r-indent: 2em;
   --r-fs-body: 18px;
+  /* Chrome bar heights, declared rather than measured so the content's
+   * padding and its edge fade can both line up with them. Safe-area
+   * insets are folded in here so the phone case needs no special rule. */
+  --r-chrome-top: calc(58px + env(safe-area-inset-top));
+  --r-chrome-bottom: calc(56px + env(safe-area-inset-bottom));
   background: var(--r-bg);
   color: var(--r-fg);
   -webkit-font-smoothing: antialiased;
@@ -43,12 +48,29 @@
     'PingFang SC', serif;
 }
 
-/* --- Themes -------------------------------------------------------------- */
+/* --- Themes --------------------------------------------------------------
+ *
+ * Five surfaces, each doing a distinct job, plus `auto` which resolves to
+ * paper or dark from the shelf's own light/dark setting (see
+ * resolveTheme in ReaderPage.tsx) — the old default dropped you from a
+ * light shelf straight into a dark reader.
+ *
+ * No pure white and no pure black on the readable themes: maximum
+ * luminance contrast is the most fatiguing pairing there is, so paper
+ * and light both sit a few points off #fff, and dark uses a near-black
+ * grey. `black` is the exception on purpose — it exists for OLED panels
+ * where a true 0 pixel is the point.
+ *
+ * The two greys the old set shipped (#2d3033 and #2c2c2e) were
+ * indistinguishable, so the swatch row really only offered three
+ * choices. `green` takes the freed slot: the 豆沙绿 low-contrast wash
+ * that Chinese readers reach for on long sessions. */
 
-.reader--theme-beige { --r-bg: #f7f3ea; --r-fg: #2a221c; --r-fg-muted: #8a7c6f; --r-accent: #78503c; }
-.reader--theme-white { --r-bg: #ffffff; --r-fg: #1c1c1e; --r-fg-muted: #777;    --r-accent: #444;    }
-.reader--theme-grey  { --r-bg: #2d3033; --r-fg: #d4d6d8; --r-fg-muted: #888c91; --r-accent: #c5c7ca; }
-.reader--theme-dark  { --r-bg: #2c2c2e; --r-fg: #b8b8ba; --r-fg-muted: #7a7a7c; --r-accent: #c8c8ca; }
+.reader--theme-paper { --r-bg: #f4efe4; --r-fg: #33291f; --r-fg-muted: #8b7d6c; --r-accent: #7a5a3f; }
+.reader--theme-light { --r-bg: #fbfbf9; --r-fg: #26292c; --r-fg-muted: #7b8087; --r-accent: #4a7f70; }
+.reader--theme-green { --r-bg: #cfe3d0; --r-fg: #22301f; --r-fg-muted: #62735f; --r-accent: #3f6b45; }
+.reader--theme-dark  { --r-bg: #1a1c1e; --r-fg: #c6cacd; --r-fg-muted: #7f858b; --r-accent: #7fb3a5; }
+.reader--theme-black { --r-bg: #000000; --r-fg: #a8adb2; --r-fg-muted: #6b7075; --r-accent: #6f9d92; }
 
 /* --- Sizes --------------------------------------------------------------- */
 
@@ -65,29 +87,30 @@
 .reader--gap-normal { --r-para-gap: 1.2em; }
 .reader--gap-loose { --r-para-gap: 1.65em; }
 
-.reader--width-narrow { --r-article-width: 620px; }
-.reader--width-normal { --r-article-width: 720px; }
-.reader--width-wide { --r-article-width: 860px; }
-
-.reader--margin-compact { --r-content-x: 16px; }
-.reader--margin-normal { --r-content-x: 24px; }
-.reader--margin-wide { --r-content-x: 42px; }
+/* One axis, two effects: on a wide screen the column width moves and the
+ * padding is irrelevant; on a phone the column is capped by the viewport
+ * so the padding is what the reader actually feels. Setting both from
+ * one control is why 页宽 and 边距 could collapse into a single row. */
+.reader--width-narrow { --r-article-width: 600px; --r-content-x: 28px; }
+.reader--width-normal { --r-article-width: 700px; --r-content-x: 20px; }
+.reader--width-wide { --r-article-width: 840px; --r-content-x: 14px; }
 
 .reader--indent-indent { --r-indent: 2em; }
 .reader--indent-flush { --r-indent: 0; }
 
-/* Light themes need dark overlay colors; dark themes need white overlays. */
-.reader--theme-beige,
-.reader--theme-white {
-  --r-overlay: rgba(0, 0, 0, 0.08);
-  --r-overlay-strong: rgba(0, 0, 0, 0.18);
-  --r-line-color: rgba(0, 0, 0, 0.1);
+/* Light themes need dark overlay colours; dark themes need white ones. */
+.reader--theme-paper,
+.reader--theme-light,
+.reader--theme-green {
+  --r-overlay: rgba(0, 0, 0, 0.055);
+  --r-overlay-strong: rgba(0, 0, 0, 0.14);
+  --r-line-color: rgba(0, 0, 0, 0.09);
 }
 
-.reader--theme-grey,
-.reader--theme-dark {
+.reader--theme-dark,
+.reader--theme-black {
   --r-overlay: rgba(255, 255, 255, 0.06);
-  --r-overlay-strong: rgba(255, 255, 255, 0.14);
+  --r-overlay-strong: rgba(255, 255, 255, 0.13);
   --r-line-color: rgba(255, 255, 255, 0.08);
 }
 
@@ -102,13 +125,27 @@
   background: var(--r-bg);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  backdrop-filter: blur(8px);
+  gap: 10px;
+  padding: 10px 14px;
 }
 
-.reader__top { top: 0; border-bottom: 1px solid var(--r-line-color); }
-.reader__bottom { bottom: 0; border-top: 1px solid var(--r-line-color); }
+.reader__top {
+  top: 0;
+  height: var(--r-chrome-top);
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-left: max(14px, env(safe-area-inset-left));
+  padding-right: max(14px, env(safe-area-inset-right));
+  border-bottom: 1px solid var(--r-line-color);
+}
+
+.reader__bottom {
+  bottom: 0;
+  height: var(--r-chrome-bottom);
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  padding-left: max(14px, env(safe-area-inset-left));
+  padding-right: max(14px, env(safe-area-inset-right));
+  border-top: 1px solid var(--r-line-color);
+}
 
 .reader__top-title {
   flex: 1;
@@ -185,8 +222,20 @@
   flex: 1;
   overflow-y: auto;
   scroll-behavior: smooth;
-  padding: 80px var(--r-content-x) 96px;
+  padding: calc(var(--r-chrome-top) + 22px) var(--r-content-x)
+    calc(var(--r-chrome-bottom) + 30px);
   cursor: text;
+  /* Lines used to be sheared in half at the edge of the chrome bars.
+   * Fading the content out across the strip just below each bar means a
+   * line dissolves instead of being cut — the fade starts where the bar
+   * ends, which is why the bar heights are variables. */
+  mask-image: linear-gradient(
+    to bottom,
+    transparent var(--r-chrome-top),
+    #000 calc(var(--r-chrome-top) + 20px),
+    #000 calc(100% - var(--r-chrome-bottom) - 24px),
+    transparent calc(100% - var(--r-chrome-bottom))
+  );
   /* Hide the native scrollbar — only a small window of chapters is
    * mounted at any time, so the native indicator misrepresents book
    * position. The header `pct%` + footer progress track are the
@@ -200,9 +249,11 @@
 }
 
 .reader__content--pdf {
-  padding: 58px 0 64px;
+  padding: var(--r-chrome-top) 0 var(--r-chrome-bottom);
   overflow: hidden;
   cursor: default;
+  /* The PDF frame is one opaque page — nothing to fade. */
+  mask-image: none;
 }
 
 .reader__pdf-frame {
@@ -328,22 +379,29 @@
   position: fixed;
   inset: 0;
   z-index: 10;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.34);
   display: flex;
   justify-content: flex-end;
+  animation: drawer-fade 140ms ease;
+}
+
+@keyframes drawer-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .drawer__panel {
-  width: min(360px, 86vw);
+  width: min(360px, 88vw);
   background: var(--r-bg);
   color: var(--r-fg);
   border-left: 1px solid var(--r-line-color);
+  padding-right: env(safe-area-inset-right);
   display: flex;
   flex-direction: column;
   animation: slide-in 180ms ease;
 }
 
-.drawer__panel--narrow { width: min(280px, 86vw); }
+.drawer__panel--narrow { width: min(320px, 88vw); }
 
 @keyframes slide-in {
   from { transform: translateX(100%); }
@@ -361,12 +419,19 @@
 .drawer__header h3 { margin: 0; font-size: 15px; font-weight: 500; }
 
 .drawer__close {
-  background: transparent;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
   border: 0;
-  color: var(--r-fg);
-  font-size: 18px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--r-fg-muted);
+  font-size: 16px;
   cursor: pointer;
 }
+
+.drawer__close:hover { background: var(--r-overlay); color: var(--r-fg); }
 
 .drawer__message {
   margin: 12px 18px;
@@ -538,8 +603,12 @@
 .settings { padding: 16px 18px; }
 .settings__row + .settings__row { margin-top: 22px; }
 .settings__label { display: block; color: var(--r-fg-muted); font-size: 13px; margin-bottom: 8px; }
-.settings__themes, .settings__sizes { display: flex; gap: 10px; }
-.settings__fonts { display: flex; flex-direction: column; gap: 8px; }
+/* Six swatches now, so let them wrap rather than squeeze. */
+.settings__themes { display: flex; flex-wrap: wrap; gap: 10px; }
+.settings__sizes { display: flex; gap: 8px; }
+/* Font names are short — three across reads better than a stack of
+ * full-width buttons, and matches the other segmented rows. */
+.settings__fonts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .settings__seg {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -560,20 +629,22 @@
 
 .settings__seg button:hover { background: var(--r-overlay); }
 .settings__seg button.is-active {
-  border-color: var(--r-accent);
-  color: var(--r-accent);
+  background: var(--r-fg);
+  border-color: transparent;
+  color: var(--r-bg);
 }
 
 .font-btn {
-  padding: 8px 12px;
+  min-width: 0;
+  padding: 9px 6px;
   border-radius: 8px;
   border: 1px solid var(--r-overlay-strong);
   background: transparent;
   color: var(--r-fg);
   cursor: pointer;
-  font-size: 14px;
-  text-align: left;
-  transition: background 80ms ease, border-color 80ms ease;
+  font-size: 13px;
+  text-align: center;
+  transition: background 100ms ease, border-color 100ms ease;
 }
 
 .font-btn--system { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -581,7 +652,11 @@
 .font-btn--wenkai { font-family: 'LXGW WenKai Screen', 'LXGW WenKai', serif; }
 
 .font-btn:hover { background: var(--r-overlay); }
-.font-btn.is-active { border-color: var(--r-accent); color: var(--r-accent); }
+.font-btn.is-active {
+  background: var(--r-fg);
+  border-color: transparent;
+  color: var(--r-bg);
+}
 
 .settings__reset {
   width: 100%;
@@ -605,20 +680,32 @@
 .settings__reset:active { transform: translateY(1px); }
 
 .theme-swatch {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 2px solid transparent;
   cursor: pointer;
-  transition: border-color 80ms ease;
+  transition: border-color 100ms ease, transform 100ms ease;
 }
 
-.theme-swatch.is-active { border-color: var(--r-accent); }
+.theme-swatch:hover { transform: scale(1.06); }
 
-.theme-swatch--beige { background: #f7f3ea; box-shadow: inset 0 0 0 1px rgba(120, 80, 60, 0.2); }
-.theme-swatch--white { background: #ffffff; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
-.theme-swatch--grey  { background: #2d3033; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15); }
-.theme-swatch--dark  { background: #2c2c2e; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15); }
+.theme-swatch.is-active {
+  border-color: var(--r-fg);
+  outline: none;
+}
+
+.theme-swatch--auto {
+  /* Split disc: the left half is what `auto` picks in light mode, the
+     right half what it picks in dark. */
+  background: linear-gradient(90deg, #f4efe4 0 50%, #1a1c1e 50% 100%);
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+}
+.theme-swatch--paper { background: #f4efe4; box-shadow: inset 0 0 0 1px rgba(120, 90, 60, 0.22); }
+.theme-swatch--light { background: #fbfbf9; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14); }
+.theme-swatch--green { background: #cfe3d0; box-shadow: inset 0 0 0 1px rgba(40, 80, 45, 0.2); }
+.theme-swatch--dark  { background: #1a1c1e; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+.theme-swatch--black { background: #000000; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22); }
 
 .size-btn {
   width: 40px;
@@ -637,6 +724,7 @@
 .size-btn--xl { font-size: 24px; }
 
 .size-btn.is-active {
-  border-color: var(--r-accent);
-  color: var(--r-accent);
+  background: var(--r-fg);
+  border-color: transparent;
+  color: var(--r-bg);
 }
