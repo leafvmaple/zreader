@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ type bookDTO struct {
 	ReadingStatus string   `json:"reading_status"`
 	CoverColor    string   `json:"cover_color"`
 	CoverLabel    string   `json:"cover_label"`
+	HasCover      bool     `json:"has_cover"`
 	Tags          []string `json:"tags,omitempty"`
 	Format        string   `json:"format"`
 	Encoding      string   `json:"encoding,omitempty"`
@@ -46,7 +48,7 @@ type chapterDTO struct {
 func toBookDTO(b store.Book) bookDTO {
 	d := bookDTO{
 		ID: b.ID, FolderID: b.FolderID, Path: publicBookPath(b), Title: b.Title,
-		Format: b.Format, SizeBytes: b.SizeBytes,
+		Format: b.Format, SizeBytes: b.SizeBytes, HasCover: b.HasCover,
 		FileMtime: b.FileMtime, AddedAt: b.AddedAt, ScannedAt: b.ScannedAt,
 	}
 	if b.Author.Valid {
@@ -170,6 +172,54 @@ func (s *Server) handleBookSource(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, filepath.Base(sourcePath), st.ModTime(), f)
+}
+
+// handleBookCover serves the book's cover image straight out of the
+// cached EPUB. Covers are immutable for the lifetime of a cache file, so
+// the response carries a strong validator built from the book's scan
+// time plus a long max-age — a shelf of 200 books re-renders from cache
+// rather than re-fetching art on every visit.
+//
+// Books with no cover return 404: the shelf is expected to consult
+// Book.has_cover first and draw a generated cover instead, so a 404 here
+// means a stale flag, not a normal path.
+func (s *Server) handleBookCover(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_id", err)
+		return
+	}
+	book, err := s.store.GetBook(r.Context(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "not_found", errors.New("book not found"))
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get_book", err)
+		return
+	}
+	if book.Format != "epub" {
+		writeError(w, http.StatusNotFound, "no_cover", errors.New("book has no cover"))
+		return
+	}
+
+	etag := fmt.Sprintf(`"cover-%d-%d"`, book.ID, book.ScannedAt)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, max-age=604800")
+	if match := r.Header.Get("If-None-Match"); match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	cover, err := library.ExtractCover(book.Path)
+	if err != nil || cover == nil {
+		writeError(w, http.StatusNotFound, "no_cover", errors.New("book has no cover"))
+		return
+	}
+	w.Header().Set("Content-Type", cover.MediaType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Length", strconv.Itoa(len(cover.Data)))
+	_, _ = w.Write(cover.Data)
 }
 
 // handleBookContent serves a slice of the book's plain-text view.

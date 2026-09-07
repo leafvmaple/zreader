@@ -171,6 +171,15 @@ export function bookSourceURL(id: number): string {
   return `/api/v1/books/${id}/source`;
 }
 
+/**
+ * Cover image URL. Only meaningful when `book.has_cover` is true —
+ * the endpoint 404s for books with no embedded art, and the shelf is
+ * expected to draw a generated cover for those instead of asking.
+ */
+export function coverURL(id: number): string {
+  return `/api/v1/books/${id}/cover`;
+}
+
 export async function searchBook(
   id: number,
   query: string,

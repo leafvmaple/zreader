@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
+import { BookCover } from '../components/BookCover';
 import type { Book, DuplicateGroup, Folder, LibraryJob, Progress, ReadingStatus, Tag } from '../types/api';
 import './ShelfPage.css';
 
@@ -737,12 +738,7 @@ export function ShelfPage() {
               const pct = b.char_count ? Math.round(((p?.char_offset ?? 0) / b.char_count) * 100) : 0;
               return (
                 <Link to={`/read/${b.id}`} key={b.id} className="continue-card">
-                  <div
-                    className="continue-card__cover"
-                    style={{ '--cc': b.cover_color || '#596070' } as React.CSSProperties}
-                  >
-                    {b.cover_label || b.title.slice(0, 1)}
-                  </div>
+                  <BookCover book={b} className="continue-card__cover" />
                   <div className="continue-card__body">
                     <div className="continue-card__title">{b.title}</div>
                     <div className="continue-card__meta">
@@ -825,12 +821,7 @@ export function ShelfPage() {
                     ★
                   </button>
                   <Link to={`/read/${b.id}`} className="book-card__link">
-                    <div
-                      className="book-card__cover"
-                      style={{ '--cc': b.cover_color || '#596070' } as React.CSSProperties}
-                    >
-                      {b.cover_label || b.title.slice(0, 1)}
-                    </div>
+                    <BookCover book={b} className="book-card__cover" />
                   </Link>
                   <div className="book-card__body">
                     <Link to={`/read/${b.id}`} className="book-card__title" title={b.title}>
@@ -871,12 +862,7 @@ export function ShelfPage() {
                     />
                   </label>
                   <Link to={`/read/${b.id}`} className="book-row__link">
-                    <div
-                      className="book-row__cover"
-                      style={{ '--cc': b.cover_color || '#596070' } as React.CSSProperties}
-                    >
-                      {b.cover_label || b.title.slice(0, 1)}
-                    </div>
+                    <BookCover book={b} className="book-row__cover" />
                     <div className="book-row__main">
                       <div className="book-row__title">
                         {b.favorite && <span className="book-row__fav">★</span>}

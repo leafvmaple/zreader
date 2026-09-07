@@ -407,7 +407,7 @@ func writeEpubFile(t *testing.T, path, title, author, text string, chapters []Ch
 		t.Fatalf("create epub: %v", err)
 	}
 	defer f.Close()
-	if _, err := BuildEpub(f, title, author, text, chapters); err != nil {
+	if _, err := BuildEpub(f, title, author, text, chapters, nil); err != nil {
 		t.Fatalf("BuildEpub: %v", err)
 	}
 }

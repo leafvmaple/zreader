@@ -58,7 +58,7 @@ func TestBuildEpub_BasicShape(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	n, err := BuildEpub(&buf, "示例书", "佚名", text, chapters)
+	n, err := BuildEpub(&buf, "示例书", "佚名", text, chapters, nil)
 	if err != nil {
 		t.Fatalf("BuildEpub: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBuildEpub_VolumeNesting(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if _, err := BuildEpub(&buf, "示例书", "佚名", text, chapters); err != nil {
+	if _, err := BuildEpub(&buf, "示例书", "佚名", text, chapters, nil); err != nil {
 		t.Fatalf("BuildEpub: %v", err)
 	}
 

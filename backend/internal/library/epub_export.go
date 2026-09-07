@@ -62,10 +62,15 @@ type epubSection struct {
 // must be ordered by ByteOffset (the order ParseChapters produces) and
 // their offsets must index into formattedText.
 //
+// cover may be nil (TXT sources have no cover art); when present it is
+// written as EPUB/cover.<ext> and declared both ways — EPUB 3
+// properties="cover-image" and the EPUB 2 <meta name="cover"> pointer —
+// so external readers and our own ExtractCover both find it.
+//
 // Returns bytes written + first error encountered. On error a partial
 // archive may have been written to w; callers should treat any error
 // return as "the EPUB is not valid, discard it".
-func BuildEpub(w io.Writer, title, author, formattedText string, chapters []Chapter) (int64, error) {
+func BuildEpub(w io.Writer, title, author, formattedText string, chapters []Chapter, cover *Cover) (int64, error) {
 	if title == "" {
 		title = "未命名"
 	}
@@ -96,8 +101,18 @@ func BuildEpub(w io.Writer, title, author, formattedText string, chapters []Chap
 	if err := zipFile(zw, "META-INF/container.xml", containerXML()); err != nil {
 		return counter.n, err
 	}
-	if err := zipFile(zw, opfPath, packageOpfXML(title, author, bookID, modified, flat)); err != nil {
+	coverFile := coverFilename(cover)
+	if err := zipFile(zw, opfPath, packageOpfXML(title, author, bookID, modified, flat, coverFile, cover)); err != nil {
 		return counter.n, err
+	}
+	if coverFile != "" {
+		cw, err := zw.Create(epubRootDir + "/" + coverFile)
+		if err != nil {
+			return counter.n, fmt.Errorf("create cover: %w", err)
+		}
+		if _, err := cw.Write(cover.Data); err != nil {
+			return counter.n, fmt.Errorf("write cover: %w", err)
+		}
 	}
 	if err := zipFile(zw, navPath, navXhtmlXML(title, roots)); err != nil {
 		return counter.n, err
@@ -198,7 +213,30 @@ func containerXML() string {
 // (manifest), declares reading order (spine), and carries metadata.
 // dcterms:modified is required by EPUB 3 — its format is the strict
 // CCYY-MM-DDThh:mm:ssZ (no fractional seconds, always UTC).
-func packageOpfXML(title, author, bookID, modified string, flat []*epubSection) string {
+// coverFilename returns the in-archive basename to store cover under,
+// or "" when there is no cover. The extension is derived from the media
+// type rather than the source href so the name is always one we can map
+// back on read.
+func coverFilename(cover *Cover) string {
+	if cover == nil || len(cover.Data) == 0 {
+		return ""
+	}
+	switch cover.MediaType {
+	case "image/jpeg":
+		return "cover.jpg"
+	case "image/png":
+		return "cover.png"
+	case "image/gif":
+		return "cover.gif"
+	case "image/webp":
+		return "cover.webp"
+	case "image/svg+xml":
+		return "cover.svg"
+	}
+	return ""
+}
+
+func packageOpfXML(title, author, bookID, modified string, flat []*epubSection, coverFile string, cover *Cover) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" xml:lang="zh" unique-identifier="bookid">
@@ -216,11 +254,19 @@ func packageOpfXML(title, author, bookID, modified string, flat []*epubSection) 
     <meta property="dcterms:modified">`)
 	b.WriteString(modified)
 	b.WriteString(`</meta>
-  </metadata>
+`)
+	if coverFile != "" {
+		b.WriteString("    <meta name=\"cover\" content=\"cover-image\"/>\n")
+	}
+	b.WriteString(`  </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
 `)
+	if coverFile != "" {
+		fmt.Fprintf(&b, "    <item id=\"cover-image\" href=\"%s\" media-type=\"%s\" properties=\"cover-image\"/>\n",
+			html.EscapeString(coverFile), html.EscapeString(cover.MediaType))
+	}
 	for i, s := range flat {
 		fmt.Fprintf(&b, "    <item id=\"chap%d\" href=\"xhtml/%s\" media-type=\"application/xhtml+xml\"/>\n",
 			i+1, html.EscapeString(s.filename))

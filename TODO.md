@@ -46,3 +46,23 @@ The parser is doing all it can when the marker is absent; fixing this requires
 either a cleaner source or a manual `<filename>.chapters.json` override
 (cross-referenced with the "asymmetric subtitle" entry above as a candidate
 use case for the same mechanism).
+
+## Covers — PDF sources get no cover art
+
+`backend/internal/library/cover.go`
+
+EPUB sources (and MOBI/AZW, which convert to EPUB first) have their cover
+extracted at format time and carried into the cached EPUB. PDFs don't: the
+obvious source would be a raster of page 1, and `rsc.io/pdf` cannot do it —
+`Value.Reader()` *panics* on any filter it doesn't implement, and page images
+are almost always `DCTDecode`, so even lifting the embedded JPEG out of an
+image-only PDF's XObject is not reachable through the exported API.
+
+Options when revisited:
+- A tiny hand-rolled PDF object scanner that finds the first `DCTDecode`
+  stream and passes the bytes through as `image/jpeg`. Covers scanned PDFs
+  (where page 1 *is* one image) and needs no new dependency.
+- A real rasteriser for text-layer PDFs. Every pure-Go option is heavy and
+  the CGO ones break the "single ~23 MB container" property.
+
+Until then PDFs fall back to the generated cover, same as TXT.

@@ -22,6 +22,8 @@ export type Book = {
   reading_status: ReadingStatus;
   cover_color: string;
   cover_label: string;
+  /** True when the cached EPUB carries real cover art (see coverURL). */
+  has_cover: boolean;
   tags?: string[];
   format: string;
   encoding?: string;

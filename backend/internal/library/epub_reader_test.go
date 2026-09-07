@@ -21,7 +21,7 @@ func writeEpubToTemp(t *testing.T, title, author, text string, chapters []Chapte
 		t.Fatalf("create temp: %v", err)
 	}
 	defer f.Close()
-	if _, err := BuildEpub(f, title, author, text, chapters); err != nil {
+	if _, err := BuildEpub(f, title, author, text, chapters, nil); err != nil {
 		t.Fatalf("BuildEpub: %v", err)
 	}
 	return p

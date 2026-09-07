@@ -24,15 +24,20 @@ type Book struct {
 	ReadingStatus string
 	CoverColor    sql.NullString
 	CoverLabel    sql.NullString
-	Format        string
-	Encoding      sql.NullString
-	SizeBytes     int64
-	CharCount     sql.NullInt64
-	ChapterCount  sql.NullInt64
-	FileMtime     int64
-	FileHash      sql.NullString
-	AddedAt       int64
-	ScannedAt     int64
+	// HasCover is set by the scanner when the cached EPUB carries real
+	// cover art. The shelf uses it to decide between requesting
+	// /books/{id}/cover and drawing a generated cover, so a library of
+	// cover-less TXT files issues no image requests at all.
+	HasCover     bool
+	Format       string
+	Encoding     sql.NullString
+	SizeBytes    int64
+	CharCount    sql.NullInt64
+	ChapterCount sql.NullInt64
+	FileMtime    int64
+	FileHash     sql.NullString
+	AddedAt      int64
+	ScannedAt    int64
 }
 
 // Chapter is one row in the chapters table.
@@ -83,10 +88,12 @@ func (s *Store) UpsertBook(ctx context.Context, b Book) (int64, bool, error) {
                chapter_count = ?,
                file_mtime    = ?,
                file_hash     = ?,
+               has_cover     = ?,
                scanned_at    = ?
          WHERE path = ?`,
 		b.FolderID, b.SourcePath, b.Format, b.Encoding,
-		b.SizeBytes, b.CharCount, b.ChapterCount, b.FileMtime, b.FileHash, now,
+		b.SizeBytes, b.CharCount, b.ChapterCount, b.FileMtime, b.FileHash,
+		boolToInt(b.HasCover), now,
 		b.Path,
 	)
 	if err != nil {
@@ -106,12 +113,13 @@ func (s *Store) UpsertBook(ctx context.Context, b Book) (int64, bool, error) {
                           category, favorite, reading_status, cover_color, cover_label,
                           format, encoding,
                           size_bytes, char_count, chapter_count, file_mtime,
-                          file_hash, added_at, scanned_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          file_hash, has_cover, added_at, scanned_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.FolderID, b.Path, b.SourcePath, b.Title, b.Author, b.Description,
 		b.Category, boolToInt(b.Favorite), b.ReadingStatus, b.CoverColor, b.CoverLabel,
 		b.Format, b.Encoding,
-		b.SizeBytes, b.CharCount, b.ChapterCount, b.FileMtime, b.FileHash, now, now,
+		b.SizeBytes, b.CharCount, b.ChapterCount, b.FileMtime, b.FileHash,
+		boolToInt(b.HasCover), now, now,
 	)
 	if err != nil {
 		return 0, false, fmt.Errorf("insert book: %w", err)
@@ -149,25 +157,52 @@ func (s *Store) ReplaceChapters(ctx context.Context, bookID int64, chapters []Ch
 	return tx.Commit()
 }
 
+// bookSelectCols is the column list every book SELECT uses, paired with
+// scanBook below. Keeping the two together means adding a column touches
+// one place instead of the three query sites that used to repeat it.
+const bookSelectCols = `
+        id, folder_id, path, source_path, title, author, description, category,
+        favorite, reading_status, cover_color, cover_label, has_cover, format, encoding,
+        size_bytes, char_count, chapter_count, file_mtime, file_hash,
+        added_at, scanned_at`
+
+// rowScanner is satisfied by both *sql.Row and *sql.Rows.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanBook reads one bookSelectCols row and normalises the derived
+// fields (bool columns, cover defaults).
+func scanBook(sc rowScanner) (Book, error) {
+	var b Book
+	var favorite, hasCover int64
+	err := sc.Scan(
+		&b.ID, &b.FolderID, &b.Path, &b.SourcePath, &b.Title, &b.Author,
+		&b.Description, &b.Category, &favorite, &b.ReadingStatus,
+		&b.CoverColor, &b.CoverLabel, &hasCover,
+		&b.Format, &b.Encoding,
+		&b.SizeBytes, &b.CharCount, &b.ChapterCount, &b.FileMtime, &b.FileHash,
+		&b.AddedAt, &b.ScannedAt,
+	)
+	b.Favorite = favorite != 0
+	b.HasCover = hasCover != 0
+	ensureBookDefaults(&b)
+	return b, err
+}
+
 // ListBooks returns every book, newest scan first. folderID==0 means "all".
 func (s *Store) ListBooks(ctx context.Context, folderID int64) ([]Book, error) {
 	var (
 		rows *sql.Rows
 		err  error
 	)
-	const selectCols = `
-        id, folder_id, path, source_path, title, author, description, category,
-        favorite, reading_status, cover_color, cover_label, format, encoding,
-        size_bytes, char_count, chapter_count, file_mtime, file_hash,
-        added_at, scanned_at`
-
 	if folderID > 0 {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT `+selectCols+` FROM books WHERE folder_id = ? ORDER BY scanned_at DESC`,
+			`SELECT `+bookSelectCols+` FROM books WHERE folder_id = ? ORDER BY scanned_at DESC`,
 			folderID)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT `+selectCols+` FROM books ORDER BY scanned_at DESC`)
+			`SELECT `+bookSelectCols+` FROM books ORDER BY scanned_at DESC`)
 	}
 	if err != nil {
 		return nil, err
@@ -176,19 +211,10 @@ func (s *Store) ListBooks(ctx context.Context, folderID int64) ([]Book, error) {
 
 	var out []Book
 	for rows.Next() {
-		var b Book
-		var favorite int64
-		if err := rows.Scan(
-			&b.ID, &b.FolderID, &b.Path, &b.SourcePath, &b.Title, &b.Author,
-			&b.Description, &b.Category, &favorite, &b.ReadingStatus, &b.CoverColor, &b.CoverLabel,
-			&b.Format, &b.Encoding,
-			&b.SizeBytes, &b.CharCount, &b.ChapterCount, &b.FileMtime, &b.FileHash,
-			&b.AddedAt, &b.ScannedAt,
-		); err != nil {
+		b, err := scanBook(rows)
+		if err != nil {
 			return nil, err
 		}
-		b.Favorite = favorite != 0
-		ensureBookDefaults(&b)
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -196,23 +222,8 @@ func (s *Store) ListBooks(ctx context.Context, folderID int64) ([]Book, error) {
 
 // GetBook fetches a single book by id.
 func (s *Store) GetBook(ctx context.Context, id int64) (Book, error) {
-	var b Book
-	var favorite int64
-	err := s.db.QueryRowContext(ctx, `
-        SELECT id, folder_id, path, source_path, title, author, description, category,
-               favorite, reading_status, cover_color, cover_label, format, encoding,
-               size_bytes, char_count, chapter_count, file_mtime, file_hash,
-               added_at, scanned_at
-          FROM books WHERE id = ?`, id).Scan(
-		&b.ID, &b.FolderID, &b.Path, &b.SourcePath, &b.Title, &b.Author,
-		&b.Description, &b.Category, &favorite, &b.ReadingStatus, &b.CoverColor, &b.CoverLabel,
-		&b.Format, &b.Encoding,
-		&b.SizeBytes, &b.CharCount, &b.ChapterCount, &b.FileMtime, &b.FileHash,
-		&b.AddedAt, &b.ScannedAt,
-	)
-	b.Favorite = favorite != 0
-	ensureBookDefaults(&b)
-	return b, err
+	return scanBook(s.db.QueryRowContext(ctx,
+		`SELECT `+bookSelectCols+` FROM books WHERE id = ?`, id))
 }
 
 const (
@@ -342,11 +353,8 @@ func (s *Store) DuplicateGroups(ctx context.Context) ([]DuplicateGroup, error) {
 }
 
 func (s *Store) booksByHash(ctx context.Context, hash string) ([]Book, error) {
-	rows, err := s.db.QueryContext(ctx, `
-        SELECT id, folder_id, path, source_path, title, author, description, category,
-               favorite, reading_status, cover_color, cover_label, format, encoding,
-               size_bytes, char_count, chapter_count, file_mtime, file_hash,
-               added_at, scanned_at
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+bookSelectCols+`
           FROM books
          WHERE file_hash = ?
          ORDER BY title ASC, id ASC`, hash)
@@ -356,18 +364,10 @@ func (s *Store) booksByHash(ctx context.Context, hash string) ([]Book, error) {
 	defer rows.Close()
 	var out []Book
 	for rows.Next() {
-		var b Book
-		var favorite int64
-		if err := rows.Scan(
-			&b.ID, &b.FolderID, &b.Path, &b.SourcePath, &b.Title, &b.Author,
-			&b.Description, &b.Category, &favorite, &b.ReadingStatus, &b.CoverColor, &b.CoverLabel,
-			&b.Format, &b.Encoding, &b.SizeBytes, &b.CharCount, &b.ChapterCount,
-			&b.FileMtime, &b.FileHash, &b.AddedAt, &b.ScannedAt,
-		); err != nil {
+		b, err := scanBook(rows)
+		if err != nil {
 			return nil, err
 		}
-		b.Favorite = favorite != 0
-		ensureBookDefaults(&b)
 		out = append(out, b)
 	}
 	return out, rows.Err()

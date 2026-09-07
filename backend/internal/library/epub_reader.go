@@ -204,6 +204,13 @@ type opfPackage struct {
 	Metadata struct {
 		Title   string `xml:"title"`
 		Creator string `xml:"creator"`
+		// Metas carries the EPUB 2 `<meta name="..." content="..."/>`
+		// pairs. Only the cover pointer is read today (cover.go); EPUB 3
+		// property-style metas land here too and are simply ignored.
+		Metas []struct {
+			Name    string `xml:"name,attr"`
+			Content string `xml:"content,attr"`
+		} `xml:"meta"`
 	} `xml:"metadata"`
 	Manifest struct {
 		Items []struct {

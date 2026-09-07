@@ -87,6 +87,7 @@ ScanFolder(folder)
   │     FormatSourceToCache(folder, source)
   │       ├─ TXT/PDF text: detect/extract text, FormatText, ParseChapters
   │       ├─ EPUB: ReadEpub, preserve nested nav + readable block text
+  │       ├─ EPUB: ExtractCover — cover art carried into the cached EPUB
   │       ├─ MOBI/AZW/AZW3: optional ebook-convert → EPUB → ReadEpub
   │       ├─ optional <source-stem>.chapters.json override
   │       └─ write → <folder>/<author>/<title>.epub (atomic)
@@ -98,6 +99,16 @@ ScanFolder(folder)
   │       └─ store.UpsertBook + store.ReplaceChapters
   └─ Phase 3 — store.DeleteBooksMissing(cached paths)
 ```
+
+**Cover art rides along in the cache.** A source EPUB's cover is extracted
+in Phase 1 and written into the cached EPUB as a `properties="cover-image"`
+manifest item (plus the EPUB 2 `<meta name="cover">` pointer). The cache
+stays the single source of truth — no parallel image directory to keep in
+sync — and `GET /books/{id}/cover` reads it back out on demand.
+`store.Book.HasCover` records whether that art exists so the shelf can skip
+the request entirely for a library of cover-less TXT files. TXT and PDF
+sources have no cover; the frontend draws a generated one (see
+`frontend/src/components/BookCover.tsx`).
 
 **Source files are never modified.** Top-level source files are read-only
 conceptually; formatted text formats live separately under

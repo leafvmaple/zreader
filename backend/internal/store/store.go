@@ -69,6 +69,7 @@ func Open(dataDir string) (*Store, error) {
 		{"reading_status", `ALTER TABLE books ADD COLUMN reading_status TEXT NOT NULL DEFAULT 'unread'`},
 		{"cover_color", `ALTER TABLE books ADD COLUMN cover_color TEXT`},
 		{"cover_label", `ALTER TABLE books ADD COLUMN cover_label TEXT`},
+		{"has_cover", `ALTER TABLE books ADD COLUMN has_cover INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, col := range bookColumns {
 		if _, err := db.Exec(col.sql); err != nil && !strings.Contains(err.Error(), "duplicate column") {

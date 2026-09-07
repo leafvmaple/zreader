@@ -1,0 +1,131 @@
+/* Book cover — a 2:3 portrait card that reads as a physical book.
+ *
+ * Typography inside the generated form scales with the cover's own
+ * width (cqw), so one component serves the 40px list thumbnail and the
+ * 180px grid card without a size prop or per-call font tuning. */
+
+.book-cover {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  width: 100%;
+  container-type: inline-size;
+  overflow: hidden;
+  /* Square spine edge, rounded fore-edge — the asymmetry is what makes
+   * a rectangle read as a book rather than a tile. */
+  border-radius: 2px 5px 5px 2px;
+  background: var(--cc, #596070);
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.14),
+    0 6px 16px rgba(16, 24, 40, 0.14);
+  flex: none;
+  user-select: none;
+}
+
+.book-cover__art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- Generated cover ------------------------------------------------ */
+
+.book-cover__generated {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 13cqw 9cqw 9cqw 15cqw;
+  color: rgba(255, 255, 255, 0.96);
+  /* Two overlays over the book's hashed hue: a soft top-left highlight
+   * so the surface isn't flat, then a downward darkening so the author
+   * line at the bottom keeps contrast on light palette entries. */
+  background-image:
+    radial-gradient(120% 90% at 22% 8%, rgba(255, 255, 255, 0.22), transparent 60%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.30));
+}
+
+.book-cover__title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18em;
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
+  font-size: 15cqw;
+  font-weight: 600;
+  line-height: 1.24;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.book-cover__rule {
+  width: 34%;
+  height: 1px;
+  margin-top: 7cqw;
+  background: rgba(255, 255, 255, 0.5);
+  flex: none;
+}
+
+.book-cover__author {
+  margin-top: auto;
+  font-size: 8cqw;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.76);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The spine: a darker band down the binding edge plus the thin bright
+ * line where the cover folds. Sits above both art and generated form so
+ * real covers get the same physicality. */
+.book-cover__spine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 7%;
+  min-width: 3px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.30) 0%,
+    rgba(0, 0, 0, 0.14) 42%,
+    rgba(255, 255, 255, 0.20) 68%,
+    rgba(0, 0, 0, 0.10) 100%
+  );
+  pointer-events: none;
+}
+
+/* The single-glyph fallback for thumbnail sizes. Hidden by default;
+ * the container query below swaps it in for the full title block. */
+.book-cover__label {
+  display: none;
+  position: absolute;
+  inset: 0 0 0 7%;
+  place-items: center;
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
+  font-size: 42cqw;
+  font-weight: 600;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.94);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Below roughly 60px the title block is too small to read and the
+ * cover just looks like a colour swatch — swap to one large glyph,
+ * which stays identifiable at list-thumbnail size. */
+@container (max-width: 60px) {
+  .book-cover__title,
+  .book-cover__rule,
+  .book-cover__author {
+    display: none;
+  }
+
+  .book-cover__label {
+    display: grid;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .book-cover {
+    transition: transform 140ms ease, box-shadow 140ms ease;
+  }
+}

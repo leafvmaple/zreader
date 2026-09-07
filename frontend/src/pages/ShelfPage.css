@@ -471,23 +471,8 @@
   border-color: var(--accent);
 }
 
-.continue-card__cover {
-  flex: 0 0 40px;
-  width: 40px;
-  height: 56px;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 18px;
-  font-weight: 600;
-  background: linear-gradient(
-    150deg,
-    color-mix(in srgb, var(--cc, #596070), #fff 16%),
-    var(--cc, #596070) 72%
-  );
-  box-shadow: inset 0 -12px 18px rgba(0, 0, 0, 0.18);
-}
+/* Cover sizing only — the artwork itself lives in BookCover.css. */
+.continue-card__cover { flex: 0 0 40px; width: 40px; }
 
 .continue-card__body {
   flex: 1;
@@ -567,23 +552,7 @@
 
 .book-row__link:hover { background: var(--hover); }
 
-.book-row__cover {
-  width: 54px;
-  height: 72px;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 24px;
-  font-weight: 600;
-  background: linear-gradient(
-    150deg,
-    color-mix(in srgb, var(--cc, #596070), #fff 16%),
-    var(--cc, #596070) 72%
-  );
-  box-shadow: inset 0 -18px 28px rgba(0, 0, 0, 0.18),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
+.book-row__cover { width: 48px; }
 
 .book-row__title {
   font-size: 15px;
@@ -749,21 +718,11 @@
   text-decoration: none;
 }
 
-.book-card__cover {
-  aspect-ratio: 3 / 4;
-  width: 100%;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 44px;
-  font-weight: 600;
-  background: linear-gradient(
-    150deg,
-    color-mix(in srgb, var(--cc, #596070), #fff 16%),
-    var(--cc, #596070) 72%
-  );
-  box-shadow: inset 0 -40px 60px rgba(0, 0, 0, 0.22);
-}
+.book-card__cover { width: 100%; }
+
+/* Lift the whole card's art on hover — the shadow transition lives on
+ * .book-cover, so this only has to move it. */
+.book-card:hover .book-cover { transform: translateY(-2px); }
 
 .book-card__select {
   position: absolute;
@@ -875,11 +834,7 @@
     border-right: 0;
   }
   .book-row__link { grid-template-columns: 48px 1fr; }
-  .book-row__cover {
-    width: 48px;
-    height: 64px;
-    font-size: 21px;
-  }
+  .book-row__cover { width: 44px; }
   .book-row__main { min-width: 0; }
   .book-row__progress, .book-row__cta { display: none; }
   .book-row__actions {

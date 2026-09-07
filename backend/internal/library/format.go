@@ -282,8 +282,16 @@ func importEpubFileToCache(folder, epubPath, sourcePath, sourceEnc string, st os
 	} else if ok {
 		chapters = override
 	}
+	// A source EPUB's cover art is the one asset the text pipeline would
+	// otherwise drop on the floor; carry it into the cache so the shelf can
+	// show the real cover. Extraction failure is never fatal — the shelf
+	// falls back to a generated cover.
+	cover, err := ExtractCover(epubPath)
+	if err != nil {
+		cover = nil
+	}
 	cachedPath := CachedPath(folder, author, title)
-	if err := writeEpubCache(cachedPath, title, author, flatText, chapters); err != nil {
+	if err := writeEpubCache(cachedPath, title, author, flatText, chapters, cover); err != nil {
 		return CacheResult{}, err
 	}
 	hash, err := headHashFile(sourcePath)
@@ -316,7 +324,7 @@ func writeTextSourceToCache(folder, sourcePath string, raw []byte, st os.FileInf
 	}
 
 	cachedPath := CachedPath(folder, author, title)
-	if err := writeEpubCache(cachedPath, title, author, formatted, chapters); err != nil {
+	if err := writeEpubCache(cachedPath, title, author, formatted, chapters, nil); err != nil {
 		return CacheResult{}, err
 	}
 	hash := ""
@@ -337,7 +345,7 @@ func writeTextSourceToCache(folder, sourcePath string, raw []byte, st os.FileInf
 	}, nil
 }
 
-func writeEpubCache(cachedPath, title, author, formatted string, chapters []Chapter) error {
+func writeEpubCache(cachedPath, title, author, formatted string, chapters []Chapter, cover *Cover) error {
 	if err := os.MkdirAll(filepath.Dir(cachedPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
@@ -346,7 +354,7 @@ func writeEpubCache(cachedPath, title, author, formatted string, chapters []Chap
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}
-	if _, err := BuildEpub(tmpFile, title, author, formatted, chapters); err != nil {
+	if _, err := BuildEpub(tmpFile, title, author, formatted, chapters, cover); err != nil {
 		_ = tmpFile.Close()
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("build epub: %w", err)

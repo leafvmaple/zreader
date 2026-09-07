@@ -261,6 +261,7 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult
 	}
 	var flatText string
 	var parsedChapters []Chapter
+	hasCover := false
 	switch cacheFormat {
 	case "epub":
 		epubBook, err := ReadEpub(cr.Path)
@@ -269,6 +270,7 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult
 		}
 		flatText = epubBook.FlatText
 		parsedChapters = epubBook.Chapters
+		hasCover = HasCover(cr.Path)
 	case "pdf-image":
 		pages := cr.SourcePages
 		if pages <= 0 {
@@ -302,6 +304,7 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult
 		ChapterCount: sql.NullInt64{Int64: int64(len(parsedChapters)), Valid: true},
 		FileMtime:    cr.SourceMtime,
 		FileHash:     sql.NullString{String: cr.SourceHash, Valid: cr.SourceHash != ""},
+		HasCover:     hasCover,
 	}
 
 	id, isNew, err := s.Store.UpsertBook(ctx, book)
