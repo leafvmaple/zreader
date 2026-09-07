@@ -57,16 +57,22 @@ A page rasteriser would solve both this and any PDF whose page 1 is drawn
 rather than scanned, but every pure-Go option is heavy and the CGO ones cost
 the single static binary.
 
-## Shelf — windowing measures on scroll, not on resize
+## Shelf — only the list and grid are windowed
 
 `frontend/src/hooks/useWindowedList.ts`
 
-Row heights are measured when a row renders and cached by index. A row that
-changes height *while mounted* without a re-render — a webfont finishing its
-swap, say — keeps its stale height until it leaves and re-enters the window.
-In practice the drift is a pixel or two and self-corrects on the next pass;
-a ResizeObserver per row would fix it exactly, at the cost of an observer
-per visible row.
+The "继续阅读" strip is capped at five entries by construction, so it never
+needs windowing.
 
-Also: only the list and grid are windowed. The "继续阅读" strip is capped at
-five entries by construction, so it never needs it.
+Resolved, and worth recording because the original entry had the diagnosis
+backwards. It claimed a row changing height while mounted kept a stale
+height until it left and re-entered the window. Measured against a
+120-book shelf, that never reproduced: `measure(index)` returned a fresh
+closure every render, so React re-ran every visible row's ref callback on
+every render and re-measured everything. The staleness was hidden — and
+paid for with a forced layout read per visible row per render, 438 of them
+across 21 scroll steps.
+
+A single ResizeObserver now reports size changes, the ref callbacks are
+stable per index, and the same scroll costs 98. The behaviour that entry
+asked for was already there; what it cost is what got fixed.

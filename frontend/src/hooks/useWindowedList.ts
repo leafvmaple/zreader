@@ -15,6 +15,19 @@ import type { RefObject } from 'react';
 // `estimate`. Since you can only scroll past what has been rendered,
 // everything above the viewport is exact and only the scrollbar length is
 // approximate, which is the one part nobody notices.
+//
+// Rows are measured on mount and then watched by a single ResizeObserver
+// for the rest of their life, so a row that changes height while mounted —
+// a webfont finishing its swap, a title rewrapping — updates its stored
+// height without waiting to leave and re-enter the window.
+//
+// This used to happen by accident and at a price. `measure(index)` built a
+// new closure per render, so React tore down and re-ran every visible row's
+// ref callback on every render, and each of those forced a layout read.
+// That masked the staleness (any render re-measured everything) while
+// making scrolling do O(visible rows) synchronous layout work per frame.
+// The ref callbacks are now stable per index, and the observer — one for
+// the whole list, not one per row — reports the size changes instead.
 
 type Options = {
   count: number;
@@ -48,6 +61,12 @@ export function useWindowedList({
   enabled,
 }: Options): Result {
   const heights = useRef<number[]>([]);
+  // The mounted row elements, and the reverse lookup the observer needs to
+  // turn one of its entries back into a list index.
+  const rows = useRef(new Map<number, HTMLElement>());
+  const rowIndex = useRef(new WeakMap<Element, number>());
+  const observer = useRef<ResizeObserver | null>(null);
+  const refs = useRef(new Map<number, (el: HTMLElement | null) => void>());
   const [, forceRecompute] = useState(0);
   const [viewport, setViewport] = useState({ scrollY: 0, height: 0, containerTop: 0 });
 
@@ -93,18 +112,65 @@ export function useWindowedList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, estimate, viewport, forceRecompute]);
 
-  const measure = useCallback(
-    (index: number) => (el: HTMLElement | null) => {
-      if (!el) return;
-      const h = el.getBoundingClientRect().height;
-      // Ignore sub-pixel noise; re-rendering on every fractional change
-      // would loop against the ResizeObserver-free measurement here.
-      if (h > 0 && Math.abs((heights.current[index] ?? 0) - h) > 1) {
-        heights.current[index] = h;
-        forceRecompute((n) => n + 1);
+  const record = useCallback((index: number, h: number) => {
+    // Ignore sub-pixel noise. The observer re-fires on every layout that
+    // touches a row, so a threshold of zero would turn rounding into an
+    // endless measure/render loop.
+    if (h > 0 && Math.abs((heights.current[index] ?? 0) - h) > 1) {
+      heights.current[index] = h;
+      forceRecompute((n) => n + 1);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const index = rowIndex.current.get(entry.target);
+        // Deliberately not entry.contentRect: that is the content box,
+        // while the mount-time path below reads the border box. Two
+        // metrics for one row would read as a change on every observation.
+        if (index !== undefined) record(index, entry.target.getBoundingClientRect().height);
       }
+    });
+    observer.current = ro;
+    // Rows mounted before this effect ran (or while windowing was off).
+    for (const [index, el] of rows.current) {
+      rowIndex.current.set(el, index);
+      ro.observe(el);
+    }
+    return () => {
+      ro.disconnect();
+      observer.current = null;
+    };
+  }, [enabled, record]);
+
+  // One stable callback per index. React only re-runs a ref callback whose
+  // identity changed, so caching these is what stops every render from
+  // detaching and re-measuring every visible row.
+  const measure = useCallback(
+    (index: number) => {
+      let fn = refs.current.get(index);
+      if (fn) return fn;
+      fn = (el: HTMLElement | null) => {
+        const prev = rows.current.get(index);
+        if (prev && prev !== el) {
+          observer.current?.unobserve(prev);
+          rows.current.delete(index);
+        }
+        if (!el) return;
+        rows.current.set(index, el);
+        rowIndex.current.set(el, index);
+        observer.current?.observe(el);
+        // Measure now as well: observation is delivered asynchronously, and
+        // waiting a frame for the first height would show one frame of
+        // estimate-sized padding on every scroll.
+        record(index, el.getBoundingClientRect().height);
+      };
+      refs.current.set(index, fn);
+      return fn;
     },
-    [],
+    [record],
   );
 
   if (!enabled || count === 0) {
