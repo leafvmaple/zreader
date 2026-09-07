@@ -78,13 +78,19 @@ export type Bookmark = {
   created_at: number;
 };
 
+/** One source file a scan could not import, with the reason why. */
+export type SourceFailure = {
+  name: string;
+  reason?: string;
+};
+
 export type ScanResult = {
   folder_id: number;
   path: string;
   added: number;
   updated: number;
   removed: number;
-  failed?: string[];
+  failed?: SourceFailure[];
 };
 
 export type LibraryJob = {
@@ -99,7 +105,7 @@ export type LibraryJob = {
   added: number;
   updated: number;
   removed: number;
-  failed?: string[];
+  failed?: SourceFailure[];
   error?: string;
   created_at: number;
   started_at?: number;

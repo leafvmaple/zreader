@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -16,15 +17,34 @@ import (
 	"github.com/leafvmaple/zreader/internal/store"
 )
 
+// SourceFailure is one file the scan could not import, with the reason.
+//
+// Reporting only the path — which is what this used to do — turns every
+// import problem into "3 failed" with no way to tell a missing converter
+// from a corrupt file without reading container logs.
+type SourceFailure struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // ScanResult is the per-folder summary returned to callers (and serialised
 // into the /api/v1/library/scan response).
 type ScanResult struct {
-	FolderID int64    `json:"folder_id"`
-	Path     string   `json:"path"`
-	Added    int      `json:"added"`
-	Updated  int      `json:"updated"`
-	Removed  int      `json:"removed"`
-	Failed   []string `json:"failed,omitempty"`
+	FolderID int64           `json:"folder_id"`
+	Path     string          `json:"path"`
+	Added    int             `json:"added"`
+	Updated  int             `json:"updated"`
+	Removed  int             `json:"removed"`
+	Failed   []SourceFailure `json:"failed,omitempty"`
+}
+
+// fail records a source that could not be imported.
+func (r *ScanResult) fail(path string, err error) {
+	reason := ""
+	if err != nil {
+		reason = err.Error()
+	}
+	r.Failed = append(r.Failed, SourceFailure{Path: path, Reason: reason})
 }
 
 // Scanner walks a library folder and ingests supported source files into the store.
@@ -111,7 +131,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 		cr, err := FormatSourceToCache(folder.Path, path)
 		if err != nil {
 			s.warnf("format %s: %v", filepath.Base(path), err)
-			res.Failed = append(res.Failed, path)
+			res.fail(path, err)
 			return nil
 		}
 		s.infof("format %s → %s (author=%q title=%q enc=%s)",
@@ -129,7 +149,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 		book, isNew, err := s.ingestFile(ctx, folder.ID, c)
 		if err != nil {
 			s.warnf("ingest %s: %v", c.Path, err)
-			res.Failed = append(res.Failed, c.Path)
+			res.fail(c.Path, err)
 			continue
 		}
 		presentPaths = append(presentPaths, book.Path)
@@ -186,22 +206,22 @@ func (s *Scanner) ScanSourceFiles(ctx context.Context, folder store.Folder, sour
 		}
 		path, err := filepath.Abs(sourcePath)
 		if err != nil {
-			res.Failed = append(res.Failed, sourcePath)
+			res.fail(sourcePath, err)
 			s.warnf("normalise source %s: %v", sourcePath, err)
 			continue
 		}
 		path = filepath.Clean(path)
 		if filepath.Dir(path) != folderPath || !IsSupportedSource(filepath.Base(path)) {
-			res.Failed = append(res.Failed, sourcePath)
+			res.fail(sourcePath, errors.New("not a supported top-level source file"))
 			s.warnf("source %s is not a supported top-level file in folder %d", sourcePath, folder.ID)
 			continue
 		}
 		if st, err := os.Stat(path); err != nil {
-			res.Failed = append(res.Failed, path)
+			res.fail(path, err)
 			s.warnf("stat source %s: %v", path, err)
 			continue
 		} else if st.IsDir() {
-			res.Failed = append(res.Failed, path)
+			res.fail(path, errors.New("source is a directory"))
 			s.warnf("source %s is a directory", path)
 			continue
 		}
@@ -209,7 +229,7 @@ func (s *Scanner) ScanSourceFiles(ctx context.Context, folder store.Folder, sour
 		cr, err := FormatSourceToCache(folderPath, path)
 		if err != nil {
 			s.warnf("format %s: %v", filepath.Base(path), err)
-			res.Failed = append(res.Failed, path)
+			res.fail(path, err)
 			continue
 		}
 		s.infof("format %s → %s (author=%q title=%q enc=%s)",
@@ -218,7 +238,7 @@ func (s *Scanner) ScanSourceFiles(ctx context.Context, folder store.Folder, sour
 		_, isNew, err := s.ingestFile(ctx, folder.ID, cr)
 		if err != nil {
 			s.warnf("ingest %s: %v", cr.Path, err)
-			res.Failed = append(res.Failed, cr.Path)
+			res.fail(cr.Path, err)
 			continue
 		}
 		if isNew {
@@ -239,7 +259,11 @@ func (s *Scanner) ScanSourceFiles(ctx context.Context, folder store.Folder, sour
 func (s *Scanner) ReparseBook(ctx context.Context, folder store.Folder, b store.Book) (ScanResult, error) {
 	sourcePath, err := FindBookSource(folder.Path, b)
 	if err != nil {
-		return ScanResult{FolderID: folder.ID, Path: folder.Path, Failed: []string{b.Path}}, err
+		return ScanResult{
+			FolderID: folder.ID,
+			Path:     folder.Path,
+			Failed:   []SourceFailure{{Path: b.Path, Reason: err.Error()}},
+		}, err
 	}
 	return s.ScanSourceFiles(ctx, folder, []string{sourcePath})
 }

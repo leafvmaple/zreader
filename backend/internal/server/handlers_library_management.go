@@ -22,31 +22,39 @@ type tagDTO struct {
 }
 
 type jobDTO struct {
-	ID         int64    `json:"id"`
-	Type       string   `json:"type"`
-	Status     string   `json:"status"`
-	Label      string   `json:"label,omitempty"`
-	FolderID   int64    `json:"folder_id,omitempty"`
-	BookID     int64    `json:"book_id,omitempty"`
-	Total      int64    `json:"total"`
-	Completed  int64    `json:"completed"`
-	Added      int64    `json:"added"`
-	Updated    int64    `json:"updated"`
-	Removed    int64    `json:"removed"`
-	Failed     []string `json:"failed,omitempty"`
-	Error      string   `json:"error,omitempty"`
-	CreatedAt  int64    `json:"created_at"`
-	StartedAt  int64    `json:"started_at,omitempty"`
-	FinishedAt int64    `json:"finished_at,omitempty"`
+	ID         int64        `json:"id"`
+	Type       string       `json:"type"`
+	Status     string       `json:"status"`
+	Label      string       `json:"label,omitempty"`
+	FolderID   int64        `json:"folder_id,omitempty"`
+	BookID     int64        `json:"book_id,omitempty"`
+	Total      int64        `json:"total"`
+	Completed  int64        `json:"completed"`
+	Added      int64        `json:"added"`
+	Updated    int64        `json:"updated"`
+	Removed    int64        `json:"removed"`
+	Failed     []failureDTO `json:"failed,omitempty"`
+	Error      string       `json:"error,omitempty"`
+	CreatedAt  int64        `json:"created_at"`
+	StartedAt  int64        `json:"started_at,omitempty"`
+	FinishedAt int64        `json:"finished_at,omitempty"`
 }
 
 type scanResultDTO struct {
-	FolderID int64    `json:"folder_id"`
-	Path     string   `json:"path"`
-	Added    int      `json:"added"`
-	Updated  int      `json:"updated"`
-	Removed  int      `json:"removed"`
-	Failed   []string `json:"failed,omitempty"`
+	FolderID int64        `json:"folder_id"`
+	Path     string       `json:"path"`
+	Added    int          `json:"added"`
+	Updated  int          `json:"updated"`
+	Removed  int          `json:"removed"`
+	Failed   []failureDTO `json:"failed,omitempty"`
+}
+
+// failureDTO names a file the scan could not import and why. Both fields go
+// through publicFailureLabel: the reason usually quotes the path it failed
+// on, so redacting only the name would leak the layout through the message.
+type failureDTO struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type jobPayload struct {
@@ -84,9 +92,6 @@ func toJobDTO(j store.LibraryJob) jobDTO {
 	}
 	if j.Failed.Valid && j.Failed.String != "" {
 		_ = json.Unmarshal([]byte(j.Failed.String), &d.Failed)
-		for i, failed := range d.Failed {
-			d.Failed[i] = publicFailureLabel(failed)
-		}
 	}
 	if j.Error.Valid {
 		d.Error = j.Error.String
@@ -468,14 +473,12 @@ func scanResultJobResult(results []library.ScanResult, failedErr error) store.Jo
 	var out store.JobResult
 	out.Total = int64(len(results))
 	out.Completed = out.Total
-	var failed []string
+	var failed []failureDTO
 	for _, res := range results {
 		out.Added += int64(res.Added)
 		out.Updated += int64(res.Updated)
 		out.Removed += int64(res.Removed)
-		for _, item := range res.Failed {
-			failed = append(failed, publicFailureLabel(item))
-		}
+		failed = append(failed, publicFailures(res.Failed)...)
 	}
 	if len(failed) > 0 {
 		b, _ := json.Marshal(failed)

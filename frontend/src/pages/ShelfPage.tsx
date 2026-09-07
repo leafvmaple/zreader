@@ -236,10 +236,6 @@ const STATUS_LABELS: Record<ReadingStatus, string> = {
   paused: '搁置',
 };
 
-function baseName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
-
 function splitTags(raw: string): string[] {
   return raw
     .split(/[,，\s]+/)
@@ -411,9 +407,11 @@ export function ShelfPage() {
       const failedList = result.scan.failed ?? [];
       const failed = failedList.length;
       if (failed > 0) {
-        const failedNames = failedList.map(baseName).join('、');
+        const failedNames = failedList.map((f) => f.name).join('、');
         setScanMsg(`已上传 ${result.uploaded.length} 个文件，${failed} 个扫描失败：${failedNames}`);
-        setUploadMsg(`以下文件未导入：${failedNames}`);
+        // The reason is what makes this actionable — "failed" alone leaves
+        // the user with nothing to do but guess.
+        setUploadMsg(failedList.map((f) => `${f.name}：${f.reason || '未知原因'}`).join('\n'));
       } else {
         setScanMsg(`添加完成：新增 ${result.scan.added}，更新 ${result.scan.updated}`);
         setUploadOpen(false);
@@ -961,7 +959,16 @@ export function ShelfPage() {
                     <strong>{job.label || job.type}</strong>
                     <span>{job.status}</span>
                     <small>新增 {job.added} · 更新 {job.updated} · 移除 {job.removed}</small>
-                    {job.failed && job.failed.length > 0 && <small>失败 {job.failed.length}</small>}
+                    {job.failed && job.failed.length > 0 && (
+                      <ul className="job-list__failed">
+                        {job.failed.map((f) => (
+                          <li key={f.name}>
+                            <b>{f.name}</b>
+                            <span>{f.reason || '未知原因'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     {job.error && <small>{job.error}</small>}
                   </div>
                   <button type="button" onClick={() => void onRetryJob(job)} disabled={scanBusy}>

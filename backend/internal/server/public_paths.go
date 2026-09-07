@@ -2,7 +2,7 @@ package server
 
 import (
 	"path"
-	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/leafvmaple/zreader/internal/library"
@@ -25,11 +25,24 @@ func publicScanResult(res library.ScanResult) scanResultDTO {
 		Updated:  res.Updated,
 		Removed:  res.Removed,
 	}
-	if len(res.Failed) > 0 {
-		out.Failed = make([]string, 0, len(res.Failed))
-		for _, failed := range res.Failed {
-			out.Failed = append(out.Failed, publicFailureLabel(failed))
-		}
+	out.Failed = publicFailures(res.Failed)
+	return out
+}
+
+// publicFailures redacts a scan's failure list for the API. The reason is
+// redacted as well as the path — error strings routinely embed the file they
+// failed on, so passing them through untouched would undo the redaction the
+// path itself gets.
+func publicFailures(in []library.SourceFailure) []failureDTO {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]failureDTO, 0, len(in))
+	for _, f := range in {
+		out = append(out, failureDTO{
+			Name:   publicBaseName(f.Path),
+			Reason: publicFailureLabel(f.Reason),
+		})
 	}
 	return out
 }
@@ -42,19 +55,26 @@ func publicScanResults(results []library.ScanResult) []scanResultDTO {
 	return out
 }
 
+// dirPrefix matches the directory portion of a path — everything up to and
+// including the final separator — for both POSIX and Windows shapes. The
+// component pattern excludes whitespace and `:` so it stops at word
+// boundaries and drive letters, while the trailing separator requirement
+// means the basename itself is never consumed, spaces and all.
+var dirPrefix = regexp.MustCompile(`(?:[A-Za-z]:)?(?:[\\/][^\\/\s:]+)*[\\/]`)
+
+// publicFailureLabel strips internal directory layout out of a message
+// bound for the API.
+//
+// It rewrites every path-looking run down to its basename, wherever the run
+// appears. Only redacting the trailing segment — which is what this did
+// originally — misses the common Go error shape `context <path>: cause`,
+// where the path sits in the middle and the tail is prose.
 func publicFailureLabel(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
-	if i := strings.Index(s, ": "); i > 0 && i < len(s)-2 {
-		return s[:i+2] + publicFailureLabel(s[i+2:])
-	}
-	base := publicBaseName(s)
-	if base == "." || base == string(filepath.Separator) || base == "/" || base == "" {
-		return s
-	}
-	return base
+	return strings.TrimSpace(dirPrefix.ReplaceAllString(s, ""))
 }
 
 func publicBaseName(s string) string {
