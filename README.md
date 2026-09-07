@@ -114,8 +114,9 @@ can write to it.
   blocks, and image alt text are preserved in the flat reader text.
 - PDF text cleanup removes repeated page headers/footers before chapter parsing.
 - Chapter parsing: Chinese `第X章/节/回/卷`, English `Chapter N`, bracketed
-  CJK numerals (`「一」`, `【3】`, `〈12〉`). Falls back to a single "正文"
-  chapter when no markers are found.
+  CJK numerals (`「一」`, `【3】`, `〈12〉`), and bare indexed headings
+  (`一、灭门`, `一 灭门`). Falls back to a single "正文" chapter when no
+  markers are found.
 - Library scan: re-runs format → ingest on each scan so parser/import fixes
   apply as soon as the library is scanned again.
 - Cover art: EPUB (and converted MOBI/AZW) covers are extracted at scan time

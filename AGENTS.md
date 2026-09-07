@@ -317,7 +317,16 @@ to the source-backed page viewer, which is where it would have been anyway.
    to `「『【〈[` / `」』】〉]` — `《》` / `（）` / `()` excluded
    (book-title / inline use, too noisy). Treated as primary tier — the
    bracket pairing is a strong signal on its own, so no threshold gate.
-4. **`LooseDigitPattern`** — bare numeric divider lines (`1`, `12`).
+4. **`SpacedNumeralPattern`** — a bare index and a title separated by
+   whitespace (`一 灭门`, `十二 围攻`), the shape "精校版" wuxia
+   typesettings use. The loosest rule in the registry: no unit character,
+   no bracket, no punctuation to anchor on. Held in check by a short
+   title cap, `modeCompete` scoring (consecutive indices), and a raised
+   `minCount` — a book typeset this way has many chapters, so a couple of
+   hits are noise by definition. Note that "unindented" is NOT available
+   as a signal here: FormatText strips the 　　 paragraph indent, so after
+   formatting every line is flush-left.
+5. **`LooseDigitPattern`** — bare numeric divider lines (`1`, `12`).
    Merged in only when the primary tiers are sparse (< 3 matches);
    stray numeric lines in body text would false-positive otherwise.
 

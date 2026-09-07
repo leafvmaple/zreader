@@ -193,6 +193,32 @@ var EnumeratedNumeralPattern = regexp.MustCompile(
 		`[\s\p{Zs}]*$`,
 )
 
+// SpacedNumeralPattern matches a bare index and a title separated by
+// whitespace: `一 灭门`, `十二 围攻`. Common in "精校版" typesettings of
+// classic wuxia, which drop the 第…章 wrapper and the 、 that
+// EnumeratedNumeralPattern requires.
+//
+// This is the loosest chapter shape in the registry — there is no unit
+// character, no bracket and no punctuation to anchor on, only "short line,
+// index, gap, short title". Three things keep it honest:
+//
+//   - The whole line must be the heading, and the title is capped short.
+//     Body prose that opens with a numeral keeps going well past that.
+//   - modeCompete puts it through consecutiveRatio, so it is kept only when
+//     the indices actually run 1, 2, 3 — scattered numerals in prose score
+//     near the floor.
+//   - minCount is raised: a book typeset this way has many chapters, so one
+//     or two hits are noise by definition.
+//
+// Note the leading-whitespace allowance is not a discriminator here.
+// FormatText strips the 　　 paragraph indent, so after formatting every
+// line is flush-left and "unindented" says nothing about being a heading.
+var SpacedNumeralPattern = regexp.MustCompile(
+	`^[\s\p{Zs}]*` +
+		`(` + chapterNumeral + `{1,4}[ \t\p{Zs}]+[^\s\r\n][^\r\n]{0,13})` +
+		`[\s\p{Zs}]*$`,
+)
+
 // AuthorByPattern matches an inline "by: NAME" / "By：NAME" tag commonly
 // embedded near the top of web-novel TXTs (e.g. `<title> by:<author>`).
 // Both ASCII and full-width colons are accepted. Case-insensitive on
@@ -314,6 +340,7 @@ var chapterRules = []chapterRule{
 	{name: "named", rank: 2, pattern: NamedChapterPattern, mode: modeTrust},
 	{name: "bracket", rank: 2, pattern: BracketedNumeralPattern, mode: modeTrust},
 	{name: "enum", rank: 2, pattern: EnumeratedNumeralPattern, mode: modeCompete, minCount: 2},
+	{name: "enum-space", rank: 2, pattern: SpacedNumeralPattern, mode: modeCompete, minCount: 3},
 }
 
 // rankMinKept caps single-match false positives at container tiers.
