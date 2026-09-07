@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import * as api from '../api/client';
 import { BookCover } from '../components/BookCover';
 import { Dialog } from '../components/Dialog';
+import { APP_NAME } from '../brand';
 import { AccountMenu } from '../components/AccountMenu';
 import { ExportDialog } from '../components/ExportDialog';
 import { useColumnCount, useWindowedList } from '../hooks/useWindowedList';
@@ -788,7 +789,7 @@ export function ShelfPage() {
       <header className={`shelf__header${stuck ? ' is-stuck' : ''}`}>
         <div className="shelf__bar">
           <div className="shelf__title">
-            <h1>zreader</h1>
+            <h1>{APP_NAME}</h1>
             <span className="shelf__count">{books.length} 本</span>
           </div>
 

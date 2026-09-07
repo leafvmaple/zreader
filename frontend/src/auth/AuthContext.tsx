@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import * as api from '../api/client';
+import { APP_NAME } from '../brand';
 import type { Account } from '../types/api';
 
 // The signed-in account, and the two operations every screen needs: sign
@@ -86,7 +87,7 @@ export function AuthGate({
   if (phase.kind === 'error') {
     return (
       <div className="auth-boot">
-        <p>无法连接到 zreader</p>
+        <p>无法连接到{APP_NAME}</p>
         <p className="auth-boot__sub">{phase.message}</p>
         <button type="button" className="shelf__btn" onClick={() => void load()}>
           重试

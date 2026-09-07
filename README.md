@@ -24,6 +24,11 @@ Open <http://localhost:8080>. The first visit asks you to create an admin
 account; everything after that is behind a login. Then click the scan button
 and start reading.
 
+The UI presents itself as **枫读**; `zreader` remains the project, image and
+API name. Change the display name in `frontend/src/brand.ts` (and the
+`<title>` in `frontend/index.html`, which is static so the tab is never
+briefly titled something else).
+
 ### Where the image is published
 
 | Registry             | Image                               |

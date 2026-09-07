@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import * as api from '../api/client';
+import { APP_NAME } from '../brand';
 import type { Account } from '../types/api';
 import './AuthPage.css';
 
@@ -46,7 +47,7 @@ export function AuthPage({
   return (
     <main className="auth">
       <form className="auth__card" onSubmit={submit}>
-        <h1 className="auth__brand">zreader</h1>
+        <h1 className="auth__brand">{APP_NAME}</h1>
         <p className="auth__lede">
           {isSetup
             ? '这是第一次启动，创建一个管理员账号。之前的阅读进度会归到这个账号下。'
