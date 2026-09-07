@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -47,10 +48,47 @@ func (r *ScanResult) fail(path string, err error) {
 	r.Failed = append(r.Failed, SourceFailure{Path: path, Reason: reason})
 }
 
+// ScanProgress is one step of a scan, reported as it happens.
+//
+// Done counts files finished, out of Total. Current is the file being worked
+// on — a scan of a few hundred books spends most of its time inside one
+// file, so a bare percentage would sit still for long stretches while a
+// filename keeps moving.
+type ScanProgress struct {
+	Done    int
+	Total   int
+	Current string
+	Added   int
+	Updated int
+	Failed  int
+	// Phase distinguishes the two passes. Formatting dominates the runtime
+	// while adding nothing to the library, so without this the tally reads
+	// "0 added" for most of a scan and looks stuck rather than busy.
+	Phase ScanPhase
+}
+
+// ScanPhase names which pass a scan is in.
+type ScanPhase string
+
+const (
+	PhaseFormat ScanPhase = "format"
+	PhaseIngest ScanPhase = "ingest"
+)
+
 // Scanner walks a library folder and ingests supported source files into the store.
 type Scanner struct {
 	Store  *store.Store
 	Logger *log.Logger
+	// Progress, when set, is called as each file is processed. It runs on
+	// the scanning goroutine, so an implementation that blocks slows the
+	// scan down.
+	Progress func(ScanProgress)
+}
+
+func (s *Scanner) report(p ScanProgress) {
+	if s.Progress != nil {
+		s.Progress(p)
+	}
 }
 
 // ScanFolder is split into four phases:
@@ -102,50 +140,46 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 	}
 
 	// Phase 1 — format sources to cached EPUBs.
+	//
+	// Collected first, then processed, so the progress report has an honest
+	// total from the outset. Streaming straight out of WalkDir would mean
+	// counting up to an unknown denominator, which is exactly the
+	// indeterminate spinner this is meant to replace.
+	sources, walkErr := s.collectSources(folder.Path)
+	if walkErr != nil {
+		return res, walkErr
+	}
+
 	var cached []CacheResult
-	walkErr := filepath.WalkDir(folder.Path, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			s.warnf("walk error at %s: %v", path, err)
-			return nil
-		}
-		if d.IsDir() {
-			if d.Name() != "." && strings.HasPrefix(d.Name(), ".") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !IsSupportedSource(d.Name()) {
-			return nil
-		}
-		// Sources live at the top level. Anything under a subdirectory
-		// is treated as cached output (or arbitrary user organisation)
-		// and is left alone here — Phase 2 will pick up whatever the
-		// format step wrote.
-		if filepath.Dir(path) != folder.Path {
-			return nil
-		}
+	for i, path := range sources {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			break
 		}
+		s.report(ScanProgress{
+			Phase: PhaseFormat,
+			Done:  i, Total: len(sources), Current: filepath.Base(path),
+			Added: res.Added, Updated: res.Updated, Failed: len(res.Failed),
+		})
 
 		cr, err := FormatSourceToCache(folder.Path, path)
 		if err != nil {
 			s.warnf("format %s: %v", filepath.Base(path), err)
 			res.fail(path, err)
-			return nil
+			continue
 		}
 		s.infof("format %s → %s (author=%q title=%q enc=%s)",
 			filepath.Base(path), relPath(folder.Path, cr.Path), cr.Author, cr.Title, cr.SourceEnc)
 		cached = append(cached, cr)
-		return nil
-	})
-	if walkErr != nil && walkErr != context.Canceled {
-		return res, walkErr
 	}
 
 	// Phase 2 — ingest cached EPUBs.
 	presentPaths := make([]string, 0, len(cached))
-	for _, c := range cached {
+	for i, c := range cached {
+		s.report(ScanProgress{
+			Phase: PhaseIngest,
+			Done:  i, Total: len(cached), Current: filepath.Base(c.Path),
+			Added: res.Added, Updated: res.Updated, Failed: len(res.Failed),
+		})
 		book, isNew, err := s.ingestFile(ctx, folder.ID, c)
 		if err != nil {
 			s.warnf("ingest %s: %v", c.Path, err)
@@ -171,6 +205,33 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder store.Folder) (ScanResu
 		return res, fmt.Errorf("touch scan: %w", err)
 	}
 	return res, nil
+}
+
+// collectSources lists the top-level supported source files in folder.
+//
+// Sources live at the top level by contract: anything in a subdirectory is
+// cached output or the user's own filing, and the format pass leaves it
+// alone.
+func (s *Scanner) collectSources(root string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			s.warnf("walk error at %s: %v", path, err)
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() != "." && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if IsSupportedSource(d.Name()) && filepath.Dir(path) == root {
+			out = append(out, path)
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out, err
 }
 
 // ScanSourceFiles imports only the provided top-level source files for a

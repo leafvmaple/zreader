@@ -419,6 +419,41 @@ try {
 
   await page.goto(baseURL, { waitUntil: 'networkidle' });
   await page.waitForSelector('.book-row');
+  // Scanning is asynchronous now: the POST returns a job immediately rather
+  // than holding the request open for the whole scan. The library here is
+  // two books, so it finishes instantly — what is worth gating is the
+  // contract, not the duration.
+  const scanStart = await page.evaluate(async () => {
+    const res = await fetch('/api/v1/library/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    return { status: res.status, body: await res.json() };
+  });
+  assert(scanStart.status === 202, `POST /library/scan = ${scanStart.status}, want 202`);
+  assert(scanStart.body.job?.id, 'scan did not return a job to poll');
+
+  const finished = await page.evaluate(async (id) => {
+    for (let i = 0; i < 60; i += 1) {
+      const j = (await (await fetch(`/api/v1/library/jobs/${id}`)).json()).job;
+      if (j.status === 'done' || j.status === 'failed') return j;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return null;
+  }, scanStart.body.job.id);
+  assert(finished, 'the scan job never reached a terminal state');
+  assert(finished.status === 'done', `scan job finished ${finished.status}: ${finished.error}`);
+  assert(finished.total > 0, `job total = ${finished.total}, want the source-file count`);
+  assert(
+    finished.completed === finished.total,
+    `job ended at ${finished.completed}/${finished.total} — progress must land on 100%`,
+  );
+
+  // Once idle, the re-attach endpoint reports nothing running.
+  const idle = await page.evaluate(async () => (await fetch('/api/v1/library/jobs/active')).status);
+  assert(idle === 204, `GET /jobs/active while idle = ${idle}, want 204`);
+
   // The AI export: rules on by default, live preview, and a download link
   // carrying the chosen rules. Toggling a rule must actually re-run the
   // export server-side rather than only relabelling the button.

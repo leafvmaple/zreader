@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/leafvmaple/zreader/internal/store"
@@ -32,6 +33,9 @@ type Server struct {
 	cfg      Config
 	store    *store.Store
 	throttle loginThrottle
+	// scanning guards against two scans running at once: both would format
+	// the same cache files, and only one of them could own the job row.
+	scanning atomic.Bool
 }
 
 // New builds a Server but does not start it. Store is required.

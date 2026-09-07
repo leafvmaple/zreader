@@ -122,6 +122,10 @@ export type LibraryJob = {
   removed: number;
   failed?: SourceFailure[];
   error?: string;
+  /** The file a running job is on right now. */
+  detail?: string;
+  /** Which pass a running scan is in: 'format' then 'ingest'. */
+  phase?: 'format' | 'ingest';
   created_at: number;
   started_at?: number;
   finished_at?: number;

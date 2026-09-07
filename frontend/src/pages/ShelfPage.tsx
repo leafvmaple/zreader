@@ -231,6 +231,54 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'favorite', label: '收藏' },
 ];
 
+// ScanProgress is the running-scan panel: a bar, a count, the file being
+// worked on, and the tallies so far.
+//
+// The filename matters as much as the percentage — a scan spends most of
+// its time inside a single large book, so a bar alone looks stuck for long
+// stretches while the name keeps moving.
+function ScanProgress({ job }: { job: LibraryJob }) {
+  const total = job.total || 0;
+  const done = Math.min(job.completed || 0, total);
+  // An unknown total (the walk hasn't finished) gets an indeterminate bar
+  // rather than a made-up percentage.
+  const known = total > 0;
+  const pct = known ? Math.round((done / total) * 100) : 0;
+
+  return (
+    <section className="scan-progress" aria-live="polite">
+      <div className="scan-progress__head">
+        <span className="scan-progress__label">
+          {job.status === 'queued'
+            ? '准备扫描…'
+            : job.phase === 'ingest'
+              ? '正在写入书库'
+              : '正在解析文件'}
+        </span>
+        <span className="scan-progress__count">
+          {known ? `${done} / ${total}` : '统计文件中…'}
+        </span>
+      </div>
+
+      <div className={`scan-progress__track${known ? '' : ' is-indeterminate'}`}>
+        <div className="scan-progress__fill" style={known ? { width: `${pct}%` } : undefined} />
+      </div>
+
+      <div className="scan-progress__foot">
+        <span className="scan-progress__current" title={job.detail || ''}>
+          {job.detail || '\u00a0'}
+        </span>
+        <span className="scan-progress__tally">
+          {job.added + job.updated > 0 && `新增 ${job.added} · 更新 ${job.updated}`}
+          {(job.failed?.length ?? 0) > 0 && (
+            <b className="scan-progress__failed"> 失败 {job.failed?.length}</b>
+          )}
+        </span>
+      </div>
+    </section>
+  );
+}
+
 const STATUS_LABELS: Record<ReadingStatus, string> = {
   unread: '未读',
   reading: '在读',
@@ -260,6 +308,7 @@ export function ShelfPage() {
   const [error, setError] = useState<string | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [scanJob, setScanJob] = useState<LibraryJob | null>(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('recent');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -375,27 +424,75 @@ export function ShelfPage() {
     void refresh();
   }, [refresh]);
 
+  // --- Scan progress -------------------------------------------------------
+  //
+  // The scan runs on the server and outlives the request that starts it, so
+  // this polls a job row rather than awaiting a response. That also means a
+  // reload mid-scan reconnects instead of showing an idle shelf, and a scan
+  // started on another device shows up here.
+
+  const pollJob = useCallback(
+    async (id: number) => {
+      // Slow enough not to hammer a NAS, fast enough that the filename
+      // visibly moves.
+      const tick = 600;
+      for (;;) {
+        let job: LibraryJob;
+        try {
+          job = await api.getJob(id);
+        } catch {
+          setScanJob(null);
+          setScanBusy(false);
+          return;
+        }
+        setScanJob(job);
+        if (job.status === 'done' || job.status === 'failed') {
+          setScanBusy(false);
+          const failed = job.failed?.length ?? 0;
+          setScanMsg(
+            job.status === 'failed'
+              ? `扫描失败：${job.error || '未知原因'}`
+              : `扫描完成：新增 ${job.added}，更新 ${job.updated}，移除 ${job.removed}` +
+                (failed > 0 ? `，${failed} 个文件未导入` : ''),
+          );
+          await refresh();
+          // Keep a failed job's detail on screen; clear a clean one.
+          if (failed === 0 && job.status === 'done') setScanJob(null);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, tick));
+      }
+    },
+    [refresh],
+  );
+
   const onScan = useCallback(async () => {
     setScanBusy(true);
     setScanMsg(null);
+    setScanJob(null);
     try {
-      const results = await api.scan();
-      const total = results.reduce(
-        (a, r) => ({
-          added: a.added + r.added,
-          updated: a.updated + r.updated,
-          removed: a.removed + r.removed,
-        }),
-        { added: 0, updated: 0, removed: 0 },
-      );
-      setScanMsg(`扫描完成：新增 ${total.added}，更新 ${total.updated}，移除 ${total.removed}`);
-      await refresh();
+      const job = await api.startScan();
+      setScanJob(job);
+      await pollJob(job.id);
     } catch (err) {
-      setScanMsg(`扫描失败：${err instanceof Error ? err.message : String(err)}`);
-    } finally {
       setScanBusy(false);
+      setScanMsg(`扫描失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [refresh]);
+  }, [pollJob]);
+
+  // Re-attach on mount to a scan already in flight.
+  useEffect(() => {
+    let cancelled = false;
+    void api.activeJob().then((job) => {
+      if (cancelled || !job) return;
+      setScanBusy(true);
+      setScanJob(job);
+      void pollJob(job.id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pollJob]);
 
   const onUpload = useCallback(async () => {
     if (uploadFiles.length === 0) {
@@ -913,6 +1010,10 @@ export function ShelfPage() {
           </label>
         </div>
       </header>
+
+      {scanJob && (scanJob.status === 'running' || scanJob.status === 'queued') && (
+        <ScanProgress job={scanJob} />
+      )}
 
       {scanMsg && <div className="shelf__notice">{scanMsg}</div>}
       {error && <div className="shelf__notice shelf__notice--error">加载失败：{error}</div>}

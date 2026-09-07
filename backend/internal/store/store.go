@@ -71,6 +71,17 @@ func Open(dataDir string) (*Store, error) {
 		{"cover_label", `ALTER TABLE books ADD COLUMN cover_label TEXT`},
 		{"has_cover", `ALTER TABLE books ADD COLUMN has_cover INTEGER NOT NULL DEFAULT 0`},
 	}
+	// library_jobs.detail carries the file a running job is on right now, so
+	// the UI can say more than a percentage.
+	for _, col := range []struct{ name, sql string }{
+		{"detail", `ALTER TABLE library_jobs ADD COLUMN detail TEXT`},
+		{"phase", `ALTER TABLE library_jobs ADD COLUMN phase TEXT`},
+	} {
+		if _, err := db.Exec(col.sql); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			_ = db.Close()
+			return nil, fmt.Errorf("add library_jobs.%s: %w", col.name, err)
+		}
+	}
 	for _, col := range bookColumns {
 		if _, err := db.Exec(col.sql); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			_ = db.Close()

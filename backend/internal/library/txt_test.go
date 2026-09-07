@@ -242,9 +242,9 @@ func TestParseChapterNumber(t *testing.T) {
 		{"第123章", 123, true},
 		{"Chapter 7 — Title", 7, true},
 		{"CHAPTER 42", 42, true},
-		{"楔子", 0, false},     // named — no numeral
-		{"序　章", 0, false},   // named — no numeral
-		{"（一）", 1, true},     // bracketed numeral
+		{"楔子", 0, false},   // named — no numeral
+		{"序　章", 0, false},  // named — no numeral
+		{"（一）", 1, true},   // bracketed numeral
 		{"「二十」", 20, true}, // another bracket form
 		{"五、子曰", 5, true},  // enumerated
 		{"", 0, false},

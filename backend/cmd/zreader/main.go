@@ -47,6 +47,16 @@ func main() {
 	}
 	defer func() { _ = st.Close() }()
 
+	// A scan runs on a goroutine, so a restart in the middle of one leaves
+	// its job row saying "running" forever — which would make the shelf wait
+	// on progress that is never coming. Nothing is resumable, so mark them
+	// failed and let the user scan again.
+	if n, err := st.FailStaleJobs(context.Background()); err != nil {
+		logger.Printf("clear stale jobs: %v", err)
+	} else if n > 0 {
+		logger.Printf("cleared %d job(s) left running by a previous process", n)
+	}
+
 	// Seed library_folders from ZREADER_LIBRARY_PATH on every boot. Duplicate
 	// entries are idempotent (ErrFolderExists is swallowed).
 	for _, root := range paths.LibraryRoots {

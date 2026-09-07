@@ -145,12 +145,34 @@ export async function deleteFolder(id: number): Promise<void> {
   await request<void>(`/api/v1/library/folders/${id}`, { method: 'DELETE' });
 }
 
-export async function scan(folderId?: number): Promise<ScanResult[]> {
-  const out = await request<{ scans: ScanResult[] }>('/api/v1/library/scan', {
+/**
+ * Start a scan. Returns immediately with the job to poll — the scan itself
+ * runs on the server and outlives this request, so a slow library no longer
+ * means a request held open for minutes.
+ */
+export async function startScan(folderId?: number): Promise<LibraryJob> {
+  const out = await request<{ job: LibraryJob }>('/api/v1/library/scan', {
     method: 'POST',
     body: JSON.stringify(folderId ? { folder_id: folderId } : {}),
   });
-  return out.scans ?? [];
+  return out.job;
+}
+
+export async function getJob(id: number): Promise<LibraryJob> {
+  const out = await request<{ job: LibraryJob }>(`/api/v1/library/jobs/${id}`);
+  return out.job;
+}
+
+/**
+ * The scan currently running, or null when idle. Lets the shelf re-attach
+ * to a scan it did not start — after a reload, or from another device.
+ */
+export async function activeJob(): Promise<LibraryJob | null> {
+  const res = await fetch('/api/v1/library/jobs/active');
+  if (res.status === 204) return null;
+  if (!res.ok) return null;
+  const out = (await res.json()) as { job: LibraryJob };
+  return out.job ?? null;
 }
 
 export async function listJobs(limit = 50): Promise<LibraryJob[]> {

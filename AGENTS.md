@@ -194,6 +194,34 @@ runtime, in the same spirit as the `<name>.chapters.json` sidecar.
   written as a pattern — that's why `collapseRepeatedMarks` is a
   function. A `([！？]){3,}` regex would also fold `？！`, which is wrong.
 
+## Scanning is a background job, not a request
+
+`POST /library/scan` creates a job row, starts a goroutine and returns 202.
+The client polls `GET /library/jobs/{id}`; `GET /library/jobs/active` is how
+it finds a scan it did not start — after a reload, or from another device.
+
+It used to run inside the request. Several hundred books, or one OCR pass,
+means minutes of a spinning button with nothing behind it, and any proxy
+timeout in between kills the response even though the scan completes.
+
+**Constraints that shaped it:**
+
+- The goroutine takes `context.Background()`, not the request context —
+  the latter is cancelled the moment the response is written, which would
+  abort the scan being started.
+- `Server.scanning` (an atomic.Bool) allows one scan at a time. Two passes
+  would format the same cache files from both, and only one could own the
+  job row. A caller that double-clicks gets the running job back.
+- `main` calls `FailStaleJobs` on boot. Nothing is resumable, so a job left
+  "running" by a killed process would otherwise make the shelf wait forever
+  on progress that is never coming.
+- Progress writes are throttled to ~200ms. The scanner reports per file, and
+  a large library would turn one scan into hundreds of serialised writes
+  competing with the ingest transactions for the same SQLite handle.
+- `ScanFolder` collects the source list before processing it, so the total
+  is honest from the first update rather than counting toward an unknown
+  denominator.
+
 ## Auth — every API route is closed by default
 
 `internal/server/middleware.go` gates all of `/api/` on a session; the only

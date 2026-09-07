@@ -35,6 +35,8 @@ type jobDTO struct {
 	Removed    int64        `json:"removed"`
 	Failed     []failureDTO `json:"failed,omitempty"`
 	Error      string       `json:"error,omitempty"`
+	Detail     string       `json:"detail,omitempty"`
+	Phase      string       `json:"phase,omitempty"`
 	CreatedAt  int64        `json:"created_at"`
 	StartedAt  int64        `json:"started_at,omitempty"`
 	FinishedAt int64        `json:"finished_at,omitempty"`
@@ -95,6 +97,13 @@ func toJobDTO(j store.LibraryJob) jobDTO {
 	}
 	if j.Error.Valid {
 		d.Error = j.Error.String
+	}
+	if j.Detail.Valid {
+		// The current file, redacted the same way failure labels are.
+		d.Detail = publicFailureLabel(j.Detail.String)
+	}
+	if j.Phase.Valid {
+		d.Phase = j.Phase.String
 	}
 	if j.StartedAt.Valid {
 		d.StartedAt = j.StartedAt.Int64
@@ -491,23 +500,65 @@ func scanResultJobResult(results []library.ScanResult, failedErr error) store.Jo
 }
 
 func (s *Server) runScanPayload(ctx context.Context, payload jobPayload) ([]library.ScanResult, error) {
+	return s.runScanPayloadWithProgress(ctx, payload, nil)
+}
+
+// runScanPayloadWithProgress is runScanPayload plus a progress sink.
+//
+// The scanner counts per folder, restarting at zero for each. Callers want
+// one bar for the whole run, so the per-folder counts are offset by
+// everything already finished. With several folders the denominator grows
+// as each one is walked — a folder's size isn't known until its turn — but
+// it never goes backwards, and the single-folder case (the normal one) is
+// exact from the first update.
+func (s *Server) runScanPayloadWithProgress(
+	ctx context.Context,
+	payload jobPayload,
+	onProgress func(library.ScanProgress),
+) ([]library.ScanResult, error) {
 	scanner := &library.Scanner{Store: s.store, Logger: s.cfg.Logger}
+
 	folders, err := s.store.ListFolders(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	doneBefore, lastTotal := 0, 0
+	if onProgress != nil {
+		scanner.Progress = func(p library.ScanProgress) {
+			lastTotal = p.Total
+			onProgress(library.ScanProgress{
+				Done:    doneBefore + p.Done,
+				Total:   doneBefore + p.Total,
+				Current: p.Current,
+				Added:   p.Added,
+				Updated: p.Updated,
+				Failed:  p.Failed,
+				Phase:   p.Phase,
+			})
+		}
+	}
+
 	var results []library.ScanResult
 	var runErr error
 	for _, f := range folders {
 		if payload.FolderID != 0 && f.ID != payload.FolderID {
 			continue
 		}
+		lastTotal = 0
 		res, err := scanner.ScanFolder(ctx, f)
 		if err != nil {
 			s.cfg.Logger.Printf("scan folder %d (%s) failed: %v", f.ID, f.Path, err)
 			runErr = err
 		}
 		results = append(results, res)
+		doneBefore += lastTotal
+	}
+
+	// Land on 100%: the scanner's last report is emitted before the final
+	// file is processed, so without this the bar stops one short.
+	if onProgress != nil {
+		onProgress(library.ScanProgress{Done: doneBefore, Total: doneBefore})
 	}
 	return results, runErr
 }
@@ -562,4 +613,23 @@ func (s *Server) bookAndFolderByID(ctx context.Context, id int64) (store.Book, s
 		return store.Book{}, store.Folder{}, err
 	}
 	return book, folder, nil
+}
+
+// handleActiveJob returns the scan currently running, or 204 when the
+// library is idle.
+//
+// A scan runs on the server, not in the tab that started it, so the client
+// needs a way to find one it did not start — after a reload, or from a
+// second device.
+func (s *Server) handleActiveJob(w http.ResponseWriter, r *http.Request) {
+	job, err := s.store.ActiveJob(r.Context())
+	if errors.Is(err, sql.ErrNoRows) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "active_job", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"job": toJobDTO(job)})
 }

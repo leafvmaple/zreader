@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS library_jobs (
     removed     INTEGER NOT NULL DEFAULT 0,
     failed      TEXT,
     error       TEXT,
+    detail      TEXT,
+    phase       TEXT,
     created_at  INTEGER NOT NULL,
     started_at  INTEGER,
     finished_at INTEGER

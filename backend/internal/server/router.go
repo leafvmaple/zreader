@@ -54,6 +54,7 @@ func (s *Server) newRouter() http.Handler {
 	mux.HandleFunc("POST /api/v1/library/scan", s.handleScan)
 	mux.HandleFunc("POST /api/v1/library/upload", s.handleUploadBooks)
 	mux.HandleFunc("GET /api/v1/library/jobs", s.handleListJobs)
+	mux.HandleFunc("GET /api/v1/library/jobs/active", s.handleActiveJob)
 	mux.HandleFunc("GET /api/v1/library/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("POST /api/v1/library/jobs/{id}/retry", s.handleRetryJob)
 	mux.HandleFunc("GET /api/v1/library/tags", s.handleListTags)
