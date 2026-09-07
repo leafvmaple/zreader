@@ -50,7 +50,7 @@ All optional. The defaults match the volume layout above.
 | `ZREADER_PORT`         | `8080`      | HTTP listen port.                                                     |
 | `ZREADER_DATA_DIR`     | `/data`     | SQLite database (`library.db`) lives here. Persist this.              |
 | `ZREADER_LIBRARY_PATH` | `/library`  | One or more book roots, OS-listsep separated (`:` on Linux).          |
-| `ZREADER_EBOOK_CONVERT`| unset       | Optional path to Calibre `ebook-convert` for MOBI/AZW/AZW3 import.    |
+| `ZREADER_EBOOK_CONVERT`| unset       | Optional path to Calibre `ebook-convert`, used only as a fallback for MOBI files the native reader declines. |
 | `ZREADER_OCR`          | unset       | Set to `1` to OCR scanned PDFs on import. See [OCR](#ocr-for-scanned-pdfs). |
 | `ZREADER_OCR_CMD`      | unset       | Path to `ocrmypdf`. Setting it also enables OCR.                      |
 | `ZREADER_OCR_LANG`     | `chi_sim+eng` | Tesseract language codes passed to `ocrmypdf -l`.                   |
@@ -99,8 +99,8 @@ can write to it.
   parser, then cached as EPUB.
 - Image-only/scanned PDF import: readable as pages out of the box, and
   fully searchable when OCR is enabled — see [OCR](#ocr-for-scanned-pdfs).
-- MOBI/AZW/AZW3 import when Calibre `ebook-convert` is installed or configured
-  with `ZREADER_EBOOK_CONVERT`.
+- MOBI/AZW/AZW3 import with no external tools. HUFF/CDIC-compressed files
+  (uncommon) fall back to Calibre `ebook-convert` when one is configured.
 - Manual chapter override sidecars: put `<book>.chapters.json` next to a source
   file to replace automatic chapter parsing.
 - EPUB text fidelity: nested navigation, readable list/blockquote/footnote
@@ -129,7 +129,8 @@ can write to it.
 - Single user. The schema has a `user_id` column but everyone is `default`
   in this mode.
 - Scanned PDFs need an external OCR tool; there is no built-in engine.
-- MOBI/AZW/AZW3 import requires an external converter; there is no native parser.
+- MOBI/AZW/AZW3 files using HUFF/CDIC compression need Calibre
+  `ebook-convert`; the native reader handles the `none` and PalmDOC schemes.
 
 ### OCR for scanned PDFs
 
@@ -295,7 +296,8 @@ runtime dependencies to the container.
   in v0.9).
 - Better EPUB fidelity for image alt text, list/blockquote/footnote blocks, and
   nested navigation.
-- MOBI/AZW/AZW3 import through optional Calibre `ebook-convert`.
+- MOBI/AZW/AZW3 import through optional Calibre `ebook-convert` (a native
+  reader replaced this in v0.10).
 - Manual chapter override sidecars for books whose automatic parsing is wrong.
 - Continued PDF text cleanup: reading order and repeated page header/footer
   filtering.
