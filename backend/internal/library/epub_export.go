@@ -169,6 +169,38 @@ func buildSections(formattedText string, chapters []Chapter) (roots, flat []*epu
 	return roots, flat
 }
 
+// xmlText escapes a string for XHTML and drops the characters XML 1.0
+// forbids outright.
+//
+// html.EscapeString handles < > & ' " — but XML also bans most C0 control
+// characters, and escaping does not save them: `&#x1D;` is just as illegal
+// as the raw byte. Real TXT rips carry them (U+0005, U+001D and friends are
+// common encoding damage), and without this the cache we write is an EPUB
+// our own reader then refuses to parse: the format pass reports success and
+// the ingest pass drops the book, so it silently never appears.
+//
+// The legal set is #x9 | #xA | #xD | #x20-#xD7FF | #xE000-#xFFFD |
+// #x10000-#x10FFFF. Illegal runes are removed rather than replaced —
+// they carry no meaning to recover, and a placeholder would show up as
+// visible junk in the prose.
+func xmlText(s string) string {
+	clean := strings.Map(func(r rune) rune {
+		switch {
+		case r == 0x09 || r == 0x0A || r == 0x0D:
+			return r
+		case r >= 0x20 && r <= 0xD7FF:
+			return r
+		case r >= 0xE000 && r <= 0xFFFD:
+			return r
+		case r >= 0x10000 && r <= 0x10FFFF:
+			return r
+		default:
+			return -1
+		}
+	}, s)
+	return html.EscapeString(clean)
+}
+
 // chapterBodyXHTML renders one chapter's body content (the <body>'s
 // children — not a full document). The slice is expected to begin with
 // the title on its own paragraph (canonical FormatText output); that
@@ -178,7 +210,7 @@ func chapterBodyXHTML(title, slice string) string {
 	var b strings.Builder
 	b.Grow(len(slice) + 64)
 	b.WriteString("<h1>")
-	b.WriteString(html.EscapeString(title))
+	b.WriteString(xmlText(title))
 	b.WriteString("</h1>\n")
 
 	paras := strings.Split(slice, "\n\n")
@@ -191,7 +223,7 @@ func chapterBodyXHTML(title, slice string) string {
 			continue
 		}
 		b.WriteString("<p>")
-		b.WriteString(html.EscapeString(para))
+		b.WriteString(xmlText(para))
 		b.WriteString("</p>\n")
 	}
 	return b.String()
@@ -245,10 +277,10 @@ func packageOpfXML(title, author, bookID, modified string, flat []*epubSection, 
 	b.WriteString(html.EscapeString(bookID))
 	b.WriteString(`</dc:identifier>
     <dc:title>`)
-	b.WriteString(html.EscapeString(title))
+	b.WriteString(xmlText(title))
 	b.WriteString(`</dc:title>
     <dc:creator>`)
-	b.WriteString(html.EscapeString(author))
+	b.WriteString(xmlText(author))
 	b.WriteString(`</dc:creator>
     <dc:language>zh</dc:language>
     <meta property="dcterms:modified">`)
@@ -289,7 +321,7 @@ func navXhtmlXML(title string, roots []*epubSection) string {
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh">
 <head><title>`)
-	b.WriteString(html.EscapeString(title))
+	b.WriteString(xmlText(title))
 	b.WriteString(`</title></head>
 <body>
 <nav epub:type="toc" id="toc">
@@ -315,7 +347,7 @@ func writeNavList(b *strings.Builder, sections []*epubSection) {
 		b.WriteString(`<li><a href="xhtml/`)
 		b.WriteString(html.EscapeString(s.filename))
 		b.WriteString(`">`)
-		b.WriteString(html.EscapeString(s.title))
+		b.WriteString(xmlText(s.title))
 		b.WriteString(`</a>`)
 		if len(s.children) > 0 {
 			b.WriteString("\n")
@@ -341,7 +373,7 @@ func tocNcxXML(title, bookID string, roots []*epubSection) string {
   <meta name="dtb:maxPageNumber" content="0"/>
 </head>
 <docTitle><text>`)
-	b.WriteString(html.EscapeString(title))
+	b.WriteString(xmlText(title))
 	b.WriteString(`</text></docTitle>
 <navMap>
 `)
@@ -359,7 +391,7 @@ func writeNcxPoints(b *strings.Builder, sections []*epubSection, playOrder *int)
 		n := *playOrder
 		fmt.Fprintf(b, "<navPoint id=\"navpoint-%d\" playOrder=\"%d\">\n", n, n)
 		b.WriteString(`  <navLabel><text>`)
-		b.WriteString(html.EscapeString(s.title))
+		b.WriteString(xmlText(s.title))
 		b.WriteString(`</text></navLabel>
   <content src="xhtml/`)
 		b.WriteString(html.EscapeString(s.filename))
@@ -394,7 +426,7 @@ func chapterXhtmlXML(title, body string) string {
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh">
 <head><title>`)
-	b.WriteString(html.EscapeString(title))
+	b.WriteString(xmlText(title))
 	b.WriteString(`</title></head>
 <body>
 `)

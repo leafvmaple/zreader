@@ -194,6 +194,21 @@ runtime, in the same spirit as the `<name>.chapters.json` sidecar.
   written as a pattern — that's why `collapseRepeatedMarks` is a
   function. A `([！？]){3,}` regex would also fold `？！`, which is wrong.
 
+## Anything written into the cached EPUB must be XML-legal
+
+`xmlText` in `epub_export.go` escapes for XHTML **and** drops the runes XML
+1.0 forbids. Escaping alone is not enough — `&#x1D;` is exactly as illegal
+as the raw byte, so a control character in a source TXT produced a cached
+EPUB that `ReadEpub` then refused.
+
+That failure mode is quiet and expensive: the format pass reports success,
+the ingest pass drops the book, and it simply never appears in the library.
+Two books were lost to it for months before the scan started reporting why.
+
+Route any new book-derived text through `xmlText`, not `html.EscapeString`.
+Generated values — IDs, filenames, media types — can keep the plain escape,
+since we control them.
+
 ## Scanning is a background job, not a request
 
 `POST /library/scan` creates a job row, starts a goroutine and returns 202.
