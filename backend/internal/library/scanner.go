@@ -272,6 +272,7 @@ func (s *Scanner) ingestFile(ctx context.Context, folderID int64, cr CacheResult
 		parsedChapters = epubBook.Chapters
 		hasCover = HasCover(cr.Path)
 	case "pdf-image":
+		hasCover = cr.HasCover
 		pages := cr.SourcePages
 		if pages <= 0 {
 			meta, err := InspectPDF(cr.Path)

@@ -189,17 +189,13 @@ func (s *Server) handleBookCover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_id", err)
 		return
 	}
-	book, err := s.store.GetBook(r.Context(), id)
+	book, folder, err := s.bookAndFolderByID(r.Context(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "not_found", errors.New("book not found"))
 		return
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "get_book", err)
-		return
-	}
-	if book.Format != "epub" {
-		writeError(w, http.StatusNotFound, "no_cover", errors.New("book has no cover"))
 		return
 	}
 
@@ -211,7 +207,22 @@ func (s *Server) handleBookCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cover, err := library.ExtractCover(book.Path)
+	// Two shapes: everything text-backed caches to an EPUB and carries its
+	// cover inside it, while an image-only PDF keeps the original file as
+	// book.Path and has its cover lifted out of the PDF on demand.
+	var cover *library.Cover
+	switch book.Format {
+	case "epub":
+		cover, err = library.ExtractCover(book.Path)
+	case "pdf-image":
+		var sourcePath string
+		sourcePath, err = library.FindBookSource(folder.Path, book)
+		if err == nil {
+			cover, err = library.ExtractPDFCover(sourcePath)
+		}
+	default:
+		err = errors.New("unsupported format")
+	}
 	if err != nil || cover == nil {
 		writeError(w, http.StatusNotFound, "no_cover", errors.New("book has no cover"))
 		return

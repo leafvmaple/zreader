@@ -138,6 +138,10 @@ type CacheResult struct {
 	SourceSize  int64  // byte size of the source file on disk
 	SourceMtime int64  // mtime of the source file, unix seconds
 	SourcePages int    // page count for page-based sources such as image PDFs
+	// HasCover is only set by sources that keep their original file as
+	// book.Path (image-only PDFs). Everything else caches to an EPUB and
+	// the scanner reads the flag back off that instead.
+	HasCover bool
 }
 
 // IsSupportedSource reports whether the scanner should treat name as a
@@ -196,7 +200,7 @@ func FormatToCache(folder, sourcePath string) (CacheResult, error) {
 	meta := DetectMetadata(text)
 	title, author := ResolveMetadata(filepath.Base(sourcePath), meta)
 
-	cr, err := writeTextSourceToCache(folder, sourcePath, raw, st, encName, text, title, author)
+	cr, err := writeTextSourceToCache(folder, sourcePath, raw, st, encName, text, title, author, nil)
 	cr.SourcePath = sourcePath
 	return cr, err
 }
@@ -224,7 +228,11 @@ func FormatPDFToCache(folder, sourcePath string) (CacheResult, error) {
 	if err != nil {
 		return CacheResult{}, err
 	}
-	cr, err := writeTextSourceToCache(folder, sourcePath, nil, st, "pdf-text", extracted.Text, title, author, hash)
+	cover, coverErr := ExtractPDFCover(sourcePath)
+	if coverErr != nil {
+		cover = nil
+	}
+	cr, err := writeTextSourceToCache(folder, sourcePath, nil, st, "pdf-text", extracted.Text, title, author, cover, hash)
 	cr.SourcePath = sourcePath
 	return cr, err
 }
@@ -242,6 +250,7 @@ func formatImagePDFToCache(sourcePath string, st os.FileInfo, meta PDFText) (Cac
 		Path:        sourcePath,
 		SourcePath:  sourcePath,
 		CacheFormat: "pdf-image",
+		HasCover:    pdfHasCover(sourcePath),
 		Title:       title,
 		Author:      author,
 		SourceEnc:   "pdf-image",
@@ -311,7 +320,7 @@ func importEpubFileToCache(folder, epubPath, sourcePath, sourceEnc string, st os
 	}, nil
 }
 
-func writeTextSourceToCache(folder, sourcePath string, raw []byte, st os.FileInfo, encName, text, title, author string, hashOverride ...string) (CacheResult, error) {
+func writeTextSourceToCache(folder, sourcePath string, raw []byte, st os.FileInfo, encName, text, title, author string, cover *Cover, hashOverride ...string) (CacheResult, error) {
 	formatted := FormatText(text, title, author)
 	formatted = ensureTrailingLF(formatted)
 	chapters := ParseChapters(formatted, nil)
@@ -324,7 +333,7 @@ func writeTextSourceToCache(folder, sourcePath string, raw []byte, st os.FileInf
 	}
 
 	cachedPath := CachedPath(folder, author, title)
-	if err := writeEpubCache(cachedPath, title, author, formatted, chapters, nil); err != nil {
+	if err := writeEpubCache(cachedPath, title, author, formatted, chapters, cover); err != nil {
 		return CacheResult{}, err
 	}
 	hash := ""
