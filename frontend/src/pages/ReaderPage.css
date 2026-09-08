@@ -634,6 +634,30 @@
   overflow-y: auto;
 }
 
+/* How many hits the book holds, against how many are on screen — on a long
+   book the first page is a small slice of the answer, and without this the
+   list looks like the whole of it. */
+.search-results__count {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--r-fg-muted);
+  border-bottom: 1px solid var(--r-line-color);
+}
+
+.search-results__more {
+  margin: 8px 16px 16px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--r-line-color);
+  border-radius: 8px;
+  color: var(--r-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.search-results__more:hover { background: var(--r-overlay); }
+.search-results__more:disabled { opacity: 0.6; cursor: progress; }
+
 .search-results li + li,
 .bookmark-list li + li {
   border-top: 1px solid var(--r-line-color);

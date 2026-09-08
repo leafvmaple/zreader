@@ -94,6 +94,15 @@ export type SearchMatch = {
   snippet: string;
 };
 
+/** One page of in-book search results, plus how many there are in total. */
+export type SearchPage = {
+  matches: SearchMatch[];
+  /** Matches in the whole book, not just this page. */
+  total: number;
+  /** Character offset to resume at; absent when this is the last page. */
+  next_from?: number;
+};
+
 export type Bookmark = {
   id: number;
   book_id: number;

@@ -526,6 +526,8 @@ export function ReaderPage() {
   const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMsg, setSearchMsg] = useState<string | null>(null);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchNext, setSearchNext] = useState<number | null>(null);
   // Percentage being dragged on the footer progress bar, or null when
   // not scrubbing. Kept separate from `pct` so the bar tracks the finger
   // immediately while the (async, chapter-loading) jump only fires on
@@ -1144,27 +1146,39 @@ export function ReaderPage() {
     [chapters, jumpToOffset],
   );
 
-  const onSearch = useCallback(async () => {
-    const q = searchQuery.trim();
-    if (!q) {
-      setSearchMsg('请输入搜索内容');
-      setSearchResults([]);
-      return;
-    }
-    setSearchBusy(true);
-    setSearchMsg(null);
-    try {
-      const matches = await api.searchBook(bookId, q);
-      setSearchResults(matches);
-      if (matches.length === 0) {
-        setSearchMsg('没有匹配结果');
+  // `from` is a character offset, not a page number: the server resumes
+  // the scan there. Passing 0 starts a new search and replaces the list;
+  // anything else appends, so paging keeps what you have already seen.
+  const runSearch = useCallback(
+    async (from: number) => {
+      const q = searchQuery.trim();
+      if (!q) {
+        setSearchMsg('请输入搜索内容');
+        setSearchResults([]);
+        setSearchTotal(0);
+        setSearchNext(null);
+        return;
       }
-    } catch (err) {
-      setSearchMsg(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSearchBusy(false);
-    }
-  }, [bookId, searchQuery]);
+      setSearchBusy(true);
+      setSearchMsg(null);
+      try {
+        const page = await api.searchBook(bookId, q, { from });
+        setSearchResults((prev) => (from === 0 ? page.matches : [...prev, ...page.matches]));
+        setSearchTotal(page.total);
+        setSearchNext(page.next_from ?? null);
+        if (from === 0 && page.matches.length === 0) {
+          setSearchMsg('没有匹配结果');
+        }
+      } catch (err) {
+        setSearchMsg(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSearchBusy(false);
+      }
+    },
+    [bookId, searchQuery],
+  );
+
+  const onSearch = useCallback(() => runSearch(0), [runSearch]);
 
   const onSearchResultClick = useCallback(
     (offset: number) => {
@@ -1589,6 +1603,11 @@ export function ReaderPage() {
               </button>
             </form>
             {searchMsg && <div className="drawer__message">{searchMsg}</div>}
+            {searchTotal > 0 && (
+              <div className="search-results__count">
+                共 {searchTotal} 处，已显示 {searchResults.length}
+              </div>
+            )}
             <ul className="search-results">
               {searchResults.map((m) => (
                 <li key={`${m.char_offset}-${m.chapter_idx}`}>
@@ -1601,6 +1620,16 @@ export function ReaderPage() {
                 </li>
               ))}
             </ul>
+            {searchNext !== null && (
+              <button
+                type="button"
+                className="search-results__more"
+                disabled={searchBusy}
+                onClick={() => void runSearch(searchNext)}
+              >
+                {searchBusy ? '加载中…' : '加载更多'}
+              </button>
+            )}
           </aside>
         </div>
       )}

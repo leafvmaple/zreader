@@ -15,7 +15,7 @@ import type {
   Progress, ProgressWrite,
   ReadingStatus,
   ScanResult,
-  SearchMatch,
+  SearchPage,
   Tag,
   ExportPreview,
   ExportRules,
@@ -282,11 +282,12 @@ export function coverURL(id: number): string {
 export async function searchBook(
   id: number,
   query: string,
-  limit = 30,
-): Promise<SearchMatch[]> {
-  const params = new URLSearchParams({ q: query, limit: String(limit) });
-  const out = await request<{ matches: SearchMatch[] }>(`/api/v1/books/${id}/search?${params}`);
-  return out.matches ?? [];
+  opts: { from?: number; limit?: number } = {},
+): Promise<SearchPage> {
+  const params = new URLSearchParams({ q: query, limit: String(opts.limit ?? 30) });
+  if (opts.from) params.set('from', String(opts.from));
+  const out = await request<SearchPage>(`/api/v1/books/${id}/search?${params}`);
+  return { matches: out.matches ?? [], total: out.total ?? 0, next_from: out.next_from };
 }
 
 export async function reparseBook(id: number): Promise<ScanResult> {

@@ -524,3 +524,111 @@ func TestBookContentIsConditional(t *testing.T) {
 		t.Errorf("a different range answered %d for the first range's tag", rr.Code)
 	}
 }
+
+// A long book's matches are not all near the front. The scan used to stop
+// at the first `limit` hits with no way to ask for more, so a common term
+// in a 4670-chapter book only ever showed the opening chapters.
+func TestSearchPagesThroughMatches(t *testing.T) {
+	ctx := context.Background()
+	bookDir := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	srv := New(Config{Port: 0, Store: st})
+
+	// 30 occurrences spread over the whole book.
+	var b strings.Builder
+	b.WriteString("Chapter 1\n\n")
+	for i := 0; i < 30; i++ {
+		b.WriteString("Filler paragraph with the needle marker inside it.\n\n")
+		b.WriteString(strings.Repeat("Padding sentence to space the hits out. ", 20) + "\n\n")
+	}
+	uploadTestBook(t, srv, "BookA - AuthorX.txt", b.String())
+	book := onlyBook(t, st, folder.ID)
+
+	search := func(query string) struct {
+		Total    int `json:"total"`
+		NextFrom int `json:"next_from"`
+		Matches  []struct {
+			CharOffset int64  `json:"char_offset"`
+			Snippet    string `json:"snippet"`
+		} `json:"matches"`
+	} {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, query, nil)
+		rr := httptest.NewRecorder()
+		testRouter(t, srv).ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("search %s = %d body=%s", query, rr.Code, rr.Body.String())
+		}
+		var out struct {
+			Total    int `json:"total"`
+			NextFrom int `json:"next_from"`
+			Matches  []struct {
+				CharOffset int64  `json:"char_offset"`
+				Snippet    string `json:"snippet"`
+			} `json:"matches"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out
+	}
+
+	base := "/api/v1/books/" + itoa(book.ID) + "/search?q=needle"
+	first := search(base + "&limit=10")
+	if first.Total != 30 {
+		t.Errorf("total = %d, want 30 — the count must cover the whole book, not the page", first.Total)
+	}
+	if len(first.Matches) != 10 {
+		t.Fatalf("page 1 returned %d matches, want 10", len(first.Matches))
+	}
+	if first.NextFrom == 0 {
+		t.Fatal("no next_from with 20 matches still unseen")
+	}
+
+	second := search(base + "&limit=10&from=" + itoa(int64(first.NextFrom)))
+	if len(second.Matches) != 10 {
+		t.Fatalf("page 2 returned %d matches, want 10", len(second.Matches))
+	}
+	if second.Matches[0].CharOffset <= first.Matches[9].CharOffset {
+		t.Errorf("page 2 starts at %d, not past page 1's last hit at %d",
+			second.Matches[0].CharOffset, first.Matches[9].CharOffset)
+	}
+	if second.Total != 30 {
+		t.Errorf("page 2 total = %d, want the same 30", second.Total)
+	}
+
+	// The final page has nothing after it.
+	last := search(base + "&limit=10&from=" + itoa(int64(second.NextFrom)))
+	if len(last.Matches) != 10 {
+		t.Fatalf("page 3 returned %d matches, want 10", len(last.Matches))
+	}
+	if last.NextFrom != 0 {
+		t.Errorf("next_from = %d on the last page, want 0", last.NextFrom)
+	}
+
+	// Every hit appears exactly once across the three pages.
+	seen := map[int64]bool{}
+	for _, page := range []int{0, 1, 2} {
+		src := [][]struct {
+			CharOffset int64  `json:"char_offset"`
+			Snippet    string `json:"snippet"`
+		}{first.Matches, second.Matches, last.Matches}[page]
+		for _, m := range src {
+			if seen[m.CharOffset] {
+				t.Errorf("offset %d returned on more than one page", m.CharOffset)
+			}
+			seen[m.CharOffset] = true
+		}
+	}
+	if len(seen) != 30 {
+		t.Errorf("saw %d distinct hits across the pages, want 30", len(seen))
+	}
+}
