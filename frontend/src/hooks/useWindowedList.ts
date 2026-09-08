@@ -4,9 +4,10 @@ import type { RefObject } from 'react';
 // useWindowedList renders only the slice of a long list that is near the
 // viewport, with spacers standing in for the rest.
 //
-// The shelf scrolls the document rather than a container, so this measures
-// against window scroll and the container's position in the page instead
-// of a scroll element's scrollTop.
+// The shelf scrolls the document, so by default this measures against
+// window scroll and the container's position in the page. Pass `scrollRef`
+// for a list that lives inside its own overflow container — the reader's
+// TOC drawer — and it measures that element's scrollTop instead.
 //
 // Heights are measured, not assumed. Shelf rows vary — a book with tags is
 // taller than one without — and a virtualiser that assumes a uniform
@@ -34,6 +35,11 @@ type Options = {
   /** Height guess for rows that have not been rendered yet. */
   estimate: number;
   containerRef: RefObject<HTMLElement | null>;
+  /**
+   * The scrolling ancestor, when the list is not scrolled by the document.
+   * May be the container itself.
+   */
+  scrollRef?: RefObject<HTMLElement | null>;
   /** Rows to keep mounted beyond each edge, so scrolling never shows a gap. */
   overscan?: number;
   /**
@@ -51,12 +57,20 @@ type Result = {
   padBottom: number;
   /** Attach to each rendered row so its real height replaces the estimate. */
   measure: (index: number) => (el: HTMLElement | null) => void;
+  /**
+   * Distance from the top of the list to row `index`, in the same
+   * coordinates as padTop. Rows not yet measured contribute `estimate`, so
+   * this is exact above the furthest point reached and approximate below —
+   * enough to scroll to a row that has never been rendered.
+   */
+  offsetOf: (index: number) => number;
 };
 
 export function useWindowedList({
   count,
   estimate,
   containerRef,
+  scrollRef,
   overscan = 6,
   enabled,
 }: Options): Result {
@@ -80,6 +94,22 @@ export function useWindowedList({
 
   const read = useCallback(() => {
     const el = containerRef.current;
+    const scroller = scrollRef?.current;
+    if (scroller) {
+      setViewport({
+        scrollY: scroller.scrollTop,
+        height: scroller.clientHeight,
+        // offsetTop against the scroller, which must therefore be the
+        // container's offset parent — `position: relative` on the
+        // scrolling element. It must also be a *different* element from
+        // the padded container: the spacers standing in for unmounted rows
+        // are the container's own height, so a container that is also the
+        // scroller feeds its spacer back in as the viewport size, and the
+        // two chase each other instead of converging.
+        containerTop: el ? el.offsetTop : 0,
+      });
+      return;
+    }
     setViewport({
       scrollY: window.scrollY,
       height: window.innerHeight,
@@ -87,18 +117,34 @@ export function useWindowedList({
       // layout that is the document, which is what we want.
       containerTop: el ? el.offsetTop : 0,
     });
-  }, [containerRef]);
+  }, [containerRef, scrollRef]);
 
   useEffect(() => {
     if (!enabled) return;
     read();
-    window.addEventListener('scroll', read, { passive: true });
+    const scroller = scrollRef?.current;
+    const target: HTMLElement | Window = scroller ?? window;
+    target.addEventListener('scroll', read, { passive: true });
     window.addEventListener('resize', read);
+
+    // A scroll container's own size is not a window resize, and reading it
+    // once at mount is not enough: the first render mounts a handful of
+    // rows and a spacer standing in for all the rest, so a container that
+    // is not yet height-constrained measures as tall as the whole list.
+    // That reading makes the window cover everything, which makes the
+    // spacer collapse, which constrains the container — and without this
+    // nothing would ever re-read it, leaving every row mounted for good.
+    let ro: ResizeObserver | undefined;
+    if (scroller) {
+      ro = new ResizeObserver(read);
+      ro.observe(scroller);
+    }
     return () => {
-      window.removeEventListener('scroll', read);
+      target.removeEventListener('scroll', read);
       window.removeEventListener('resize', read);
+      ro?.disconnect();
     };
-  }, [enabled, read]);
+  }, [enabled, read, scrollRef]);
 
   // Running offsets, rebuilt whenever a measurement lands. O(count) per
   // rebuild rather than per scroll — scrolling only binary-searches this.
@@ -173,8 +219,10 @@ export function useWindowedList({
     [record],
   );
 
+  const offsetOf = (index: number) => offsets[Math.max(0, Math.min(index, count))] ?? 0;
+
   if (!enabled || count === 0) {
-    return { start: 0, end: count, padTop: 0, padBottom: 0, measure };
+    return { start: 0, end: count, padTop: 0, padBottom: 0, measure, offsetOf };
   }
 
   // Where the viewport sits in the list's own coordinate space.
@@ -201,6 +249,7 @@ export function useWindowedList({
     padTop: offsets[start],
     padBottom: offsets[count] - offsets[end],
     measure,
+    offsetOf,
   };
 }
 

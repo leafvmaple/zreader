@@ -528,11 +528,20 @@
 
 /* --- TOC ----------------------------------------------------------------- */
 
+/* The scroller owns the drawer's leftover height; the list inside it owns
+   the windowing spacers. Keeping those on separate elements is what stops
+   a spacer from becoming the viewport measurement that sized it. */
+.toc__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+}
+
 .toc {
   list-style: none;
   margin: 0;
   padding: 8px 0;
-  overflow-y: auto;
 }
 
 .toc__sublist {
@@ -563,7 +572,10 @@
   border-top: 1px solid var(--r-divider, rgba(0, 0, 0, 0.08));
   margin-top: 4px;
 }
-.toc__node--container:first-child { border-top: 0; }
+/* The separator is suppressed on a node that opens its parent's group.
+   This was `:first-child` when the tree was nested markup; the list is
+   flat now, where that selector would only ever match the very first row. */
+.toc__node--first { border-top: 0; }
 
 /* Depth-based indent + sizing. d0 is outermost (no extra indent), each
    level adds 16px. Container vs leaf padding differs slightly so a

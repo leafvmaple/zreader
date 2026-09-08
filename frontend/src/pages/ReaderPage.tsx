@@ -1,8 +1,9 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as api from '../api/client';
 import { useThrottledProgress } from '../hooks/useThrottledProgress';
+import { useWindowedList } from '../hooks/useWindowedList';
 import type { Book, Bookmark, Chapter, Progress, ReadingFont, SearchMatch } from '../types/api';
 import './ReaderPage.css';
 
@@ -264,6 +265,11 @@ function chapterIdxAtOffset(offset: number, chapters: Chapter[]): number {
 // "chapter" — depth alone drives visual rendering.
 type TOCNode = { chapter: Chapter; children: TOCNode[] };
 
+// A flattened tree row. Depth drives the indent class; `firstChild` stands
+// in for the `:first-child` selector the nested markup used to satisfy,
+// which flattening would otherwise apply only to the very first row.
+type TOCRow = { chapter: Chapter; depth: number; container: boolean; firstChild: boolean };
+
 function buildTOCTree(chapters: Chapter[]): TOCNode[] {
   const roots: TOCNode[] = [];
   const stack: TOCNode[] = [];
@@ -282,52 +288,40 @@ function buildTOCTree(chapters: Chapter[]): TOCNode[] {
   return roots;
 }
 
+// flattenTOC walks the tree into the row order the drawer renders.
+//
+// The nesting was only ever carrying indent, and the indent comes from the
+// per-depth padding classes — .toc__sublist has no padding of its own — so
+// a flat list renders identically. Flat is what lets the drawer window: a
+// 4670-chapter book mounted ~9,000 nodes on open, every one of them laid
+// out before the first row could be shown.
+function flattenTOC(nodes: TOCNode[], depth: number, out: TOCRow[]): TOCRow[] {
+  nodes.forEach((node, i) => {
+    out.push({
+      chapter: node.chapter,
+      depth,
+      container: node.children.length > 0,
+      firstChild: i === 0,
+    });
+    if (node.children.length > 0) flattenTOC(node.children, depth + 1, out);
+  });
+  return out;
+}
+
 // MAX_TOC_DEPTH caps the per-depth CSS class for indent / typography.
 // Deeper levels still render — they just share styling with the last
 // styled depth. Three depths cover every shape our parser produces
 // today (部 / 卷 / 章); push this up if we ever support 4+ tiers.
 const MAX_TOC_DEPTH = 3;
 
-function TOCNodeItem({
-  node,
-  depth,
-  currentChapter,
-  onJump,
-}: {
-  node: TOCNode;
-  depth: number;
-  currentChapter: number;
-  onJump: (idx: number) => void;
-}): React.ReactNode {
-  const hasChildren = node.children.length > 0;
-  const isActive = node.chapter.idx === currentChapter;
-  const className = [
-    'toc__node',
-    `toc__node--d${Math.min(depth, MAX_TOC_DEPTH)}`,
-    hasChildren ? 'toc__node--container' : 'toc__node--leaf',
-    isActive ? 'toc__node--active' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-  return (
-    <li className={className}>
-      <button onClick={() => onJump(node.chapter.idx)}>{node.chapter.title}</button>
-      {hasChildren && (
-        <ul className="toc__sublist">
-          {node.children.map((c) => (
-            <TOCNodeItem
-              key={c.chapter.idx}
-              node={c}
-              depth={depth + 1}
-              currentChapter={currentChapter}
-              onJump={onJump}
-            />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}
+// TOC_ROW_ESTIMATE is the height of a single-line leaf row, used for rows
+// that have not been rendered yet. Container rows and wrapped titles are
+// taller; those correct themselves once measured.
+const TOC_ROW_ESTIMATE = 40;
+
+// TOC_WINDOW_THRESHOLD: below this, mounting the whole list costs less
+// than the windowing does, and find-in-page keeps working across it.
+const TOC_WINDOW_THRESHOLD = 80;
 
 function TOCList({
   chapters,
@@ -338,30 +332,90 @@ function TOCList({
   currentChapter: number;
   onJump: (idx: number) => void;
 }): React.ReactNode {
-  const tree = buildTOCTree(chapters);
+  const rows = useMemo(() => flattenTOC(buildTOCTree(chapters), 0, []), [chapters]);
+  // Two elements on purpose: the scroller owns the height, the list owns
+  // the spacers. See the note in useWindowedList's container branch.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
+  const windowed = rows.length > TOC_WINDOW_THRESHOLD;
+
+  const { start, end, padTop, padBottom, measure, offsetOf } = useWindowedList({
+    count: rows.length,
+    estimate: TOC_ROW_ESTIMATE,
+    containerRef: listRef,
+    scrollRef,
+    enabled: windowed,
+  });
+
+  const activeIndex = useMemo(
+    () => rows.findIndex((r) => r.chapter.idx === currentChapter),
+    [rows, currentChapter],
+  );
 
   // Open the TOC where the reader actually is. Without this a 200-chapter
   // book always opened at chapter 1 and you had to hunt for the highlight.
   // Runs once per mount — the drawer unmounts on close, so reopening
   // re-centres on the chapter you moved to.
+  //
+  // scrollIntoView cannot be used while windowed: the active row is not
+  // mounted yet when the list has thousands of entries. Scrolling to its
+  // computed offset renders it, and a second pass corrects for the
+  // difference between the estimate and the rows' real heights.
+  const centred = useRef(false);
+  // offsetOf is rebuilt every render, so it cannot be an effect dependency:
+  // the effect would re-run on every scroll and yank the list back to the
+  // current chapter the moment you moved away from it.
+  const offsetOfRef = useRef(offsetOf);
+  offsetOfRef.current = offsetOf;
+
   useLayoutEffect(() => {
-    const active = listRef.current?.querySelector('.toc__node--active');
-    active?.scrollIntoView({ block: 'center' });
-  }, []);
+    const el = scrollRef.current;
+    if (!el || activeIndex < 0 || centred.current) return;
+    centred.current = true;
+    if (!windowed) {
+      el.querySelector('.toc__node--active')?.scrollIntoView({ block: 'center' });
+      return;
+    }
+    // The target moves as rows around it mount and swap their estimated
+    // height for a real one, so re-aim over the next few frames instead of
+    // landing once on the estimate.
+    let passes = 0;
+    const aim = () => {
+      const want = Math.max(0, offsetOfRef.current(activeIndex) - el.clientHeight / 2);
+      if (Math.abs(el.scrollTop - want) > 4) el.scrollTop = want;
+      if (++passes < 4) requestAnimationFrame(aim);
+    };
+    aim();
+  }, [activeIndex, windowed]);
+
+  const visible = windowed ? rows.slice(start, end) : rows;
 
   return (
-    <ul className="toc" ref={listRef}>
-      {tree.map((n) => (
-        <TOCNodeItem
-          key={n.chapter.idx}
-          node={n}
-          depth={0}
-          currentChapter={currentChapter}
-          onJump={onJump}
-        />
-      ))}
-    </ul>
+    <div className="toc__scroll" ref={scrollRef}>
+      <ul
+        className="toc"
+        ref={listRef}
+        style={windowed ? { paddingTop: padTop, paddingBottom: padBottom } : undefined}
+      >
+        {visible.map((row, i) => {
+        const index = windowed ? start + i : i;
+        const className = [
+          'toc__node',
+          `toc__node--d${Math.min(row.depth, MAX_TOC_DEPTH)}`,
+          row.container ? 'toc__node--container' : 'toc__node--leaf',
+          row.firstChild ? 'toc__node--first' : '',
+          row.chapter.idx === currentChapter ? 'toc__node--active' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+          return (
+            <li key={row.chapter.idx} className={className} ref={measure(index)}>
+              <button onClick={() => onJump(row.chapter.idx)}>{row.chapter.title}</button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -459,6 +513,9 @@ export function ReaderPage() {
   // TOC jumps; the useLayoutEffect below consumes it when the right
   // chapter is in the DOM.
   const pendingScrollRef = useRef<number | null>(null);
+  // Assigned once onScroll exists, further down. The jump-apply effect is
+  // declared above it and has to invoke it.
+  const onScrollRef = useRef<() => void>(() => {});
 
   const { report, flush } = useThrottledProgress({
     bookId,
@@ -694,6 +751,13 @@ export function ReaderPage() {
     if (applied) {
       pendingScrollRef.current = null;
       initialised.current = true;
+      // The header title and the progress readout are only ever computed
+      // from a scroll event, and a jump that lands on the scrollTop it
+      // started at fires none — every jump into a freshly opened window
+      // starts at 0, so opening chapter 2150 from the contents left the
+      // header naming chapter 1 and the progress reading 0%. Worse, that
+      // stale position is what the next progress write would save.
+      onScrollRef.current();
     }
   }, [loadedRange, chapters, book, applyScrollFromOffset]);
 
@@ -884,6 +948,8 @@ export function ReaderPage() {
       void extendUp();
     }
   }, [book, chapters, loadedRange, report, extendDown, extendUp]);
+
+  onScrollRef.current = onScroll;
 
   // --- Keyboard nav -------------------------------------------------------
 
