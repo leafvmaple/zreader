@@ -489,7 +489,13 @@ export function ReaderPage() {
   });
 
   const [currentChapter, setCurrentChapter] = useState(1);
-  const [currentOffset, setCurrentOffset] = useState(0);
+  // Not state: this changes on nearly every scroll frame but is never
+  // rendered — only read when adding a bookmark. As state it re-rendered
+  // the whole reader, paragraphs included, once per frame of scrolling.
+  const currentOffsetRef = useRef(0);
+  const setCurrentOffset = (v: number) => {
+    currentOffsetRef.current = v;
+  };
   const [pct, setPct] = useState(0);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -886,6 +892,42 @@ export function ReaderPage() {
     [bookId, book, chapters, loadedRange, applyScrollFromOffset],
   );
 
+  // Where each loaded chapter starts, and the content padding, cached.
+  //
+  // This used to be a getElementById + offsetTop pair per loaded chapter,
+  // plus a getComputedStyle, on every scroll event. Both are forced
+  // synchronous layout, and the loaded window only grows as you read: at
+  // 40 chapters that was ~98 layout reads per frame, and it climbs from
+  // there for as long as the session lasts.
+  //
+  // scrollHeight is the invalidation key. Every way the table can go stale
+  // — a chapter appended or prepended, a font swap, a settings change that
+  // reflows the column — changes the scrolled content's height, and
+  // reading one property is far cheaper than rebuilding the table.
+  const topsCache = useRef<{
+    key: string;
+    padTop: number;
+    tops: { idx: number; top: number }[];
+  } | null>(null);
+
+  const chapterTops = useCallback((el: HTMLElement, range: { lo: number; hi: number }) => {
+    const key = `${range.lo}-${range.hi}-${el.scrollHeight}-${el.clientWidth}`;
+    const cached = topsCache.current;
+    if (cached && cached.key === key) return cached;
+    const tops: { idx: number; top: number }[] = [];
+    for (let idx = range.lo; idx <= range.hi; idx++) {
+      const anchor = document.getElementById(`chap-${idx}`);
+      if (anchor) tops.push({ idx, top: anchor.offsetTop });
+    }
+    const next = {
+      key,
+      padTop: parseFloat(getComputedStyle(el).paddingTop) || 0,
+      tops,
+    };
+    topsCache.current = next;
+    return next;
+  }, []);
+
   // --- Scroll → progress + extension triggers ----------------------------
 
   const onScroll = useCallback(() => {
@@ -900,23 +942,19 @@ export function ReaderPage() {
     // misclassify the active chapter right after a TOC jump.
     const viewport = el.clientHeight;
     const scrollTop = el.scrollTop;
-    const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
-    const readingPos = scrollTop + padTop;
+    const readingPos = scrollTop + chapterTops(el, loadedRange).padTop;
     const total = book.char_count ?? 0;
 
+    const tops = chapterTops(el, loadedRange).tops;
     let activeIdx = loadedRange.lo;
     let activeTop = 0;
     let activeHeight = el.scrollHeight;
-    for (let idx = loadedRange.lo; idx <= loadedRange.hi; idx++) {
-      const anchor = document.getElementById(`chap-${idx}`);
-      if (!anchor) continue;
-      const next = document.getElementById(`chap-${idx + 1}`);
-      const top = anchor.offsetTop;
-      const bottom = next ? next.offsetTop : el.scrollHeight;
+    for (let i = 0; i < tops.length; i++) {
+      const bottom = i + 1 < tops.length ? tops[i + 1].top : el.scrollHeight;
       if (readingPos + 1 < bottom) {
-        activeIdx = idx;
-        activeTop = top;
-        activeHeight = Math.max(1, bottom - top);
+        activeIdx = tops[i].idx;
+        activeTop = tops[i].top;
+        activeHeight = Math.max(1, bottom - tops[i].top);
         break;
       }
     }
@@ -947,9 +985,27 @@ export function ReaderPage() {
     if (scrollTop < viewport * PREFETCH_TRIGGER) {
       void extendUp();
     }
-  }, [book, chapters, loadedRange, report, extendDown, extendUp]);
+  }, [book, chapters, loadedRange, report, extendDown, extendUp, chapterTops]);
 
   onScrollRef.current = onScroll;
+
+  // Scroll events can arrive several times per frame; the work behind them
+  // is only meaningful once per frame, and doing it more often just spends
+  // layout reads the browser then throws away.
+  const scrollFrame = useRef<number | null>(null);
+  const onScrollThrottled = useCallback(() => {
+    if (scrollFrame.current !== null) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      onScrollRef.current();
+    });
+  }, []);
+  useEffect(
+    () => () => {
+      if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    },
+    [],
+  );
 
   // --- Keyboard nav -------------------------------------------------------
 
@@ -1064,7 +1120,7 @@ export function ReaderPage() {
     if (!book) return;
     try {
       const b = await api.addBookmark(bookId, {
-        char_offset: currentOffset,
+        char_offset: currentOffsetRef.current,
         chapter_idx: currentChapter,
       });
       setBookmarks((prev) => [...prev, b].sort((a, b) => a.char_offset - b.char_offset));
@@ -1072,7 +1128,7 @@ export function ReaderPage() {
     } catch (err) {
       setSearchMsg(err instanceof Error ? err.message : String(err));
     }
-  }, [book, bookId, currentChapter, currentOffset]);
+  }, [book, bookId, currentChapter]);
 
   const onDeleteBookmark = useCallback(
     async (bookmarkId: number) => {
@@ -1326,7 +1382,7 @@ export function ReaderPage() {
       <div
         ref={scrollRef}
         className="reader__content"
-        onScroll={onScroll}
+        onScroll={onScrollThrottled}
         onClick={onContentClick}
       >
         {error && <p className="reader__error">加载失败：{error}</p>}
