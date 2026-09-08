@@ -75,6 +75,7 @@ func (s *Server) newRouter() http.Handler {
 	mux.HandleFunc("POST /api/v1/books/{id}/reparse", s.handleReparseBook)
 	mux.HandleFunc("GET /api/v1/books/{id}/bookmarks", s.handleListBookmarks)
 	mux.HandleFunc("POST /api/v1/books/{id}/bookmarks", s.handleAddBookmark)
+	mux.HandleFunc("PATCH /api/v1/books/{id}/bookmarks/{bookmark_id}", s.handleUpdateBookmark)
 	mux.HandleFunc("DELETE /api/v1/books/{id}/bookmarks/{bookmark_id}", s.handleDeleteBookmark)
 
 	// Reading progress (per-user)

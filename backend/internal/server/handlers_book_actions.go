@@ -200,6 +200,11 @@ func chapterIdxAtCharOffset(offset int64, chapters []store.Chapter) int64 {
 	return idx
 }
 
+// maxBookmarkNoteRunes bounds what a note may hold. A bookmark note is a
+// line about why you marked the spot, not a place to paste a chapter — and
+// the whole list is loaded with the drawer.
+const maxBookmarkNoteRunes = 500
+
 func (s *Server) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	bookID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -266,6 +271,11 @@ func (s *Server) handleAddBookmark(w http.ResponseWriter, r *http.Request) {
 		b.ChapterIdx = sql.NullInt64{Int64: body.ChapterIdx, Valid: true}
 	}
 	if note := strings.TrimSpace(body.Note); note != "" {
+		if utf8.RuneCountInString(note) > maxBookmarkNoteRunes {
+			writeError(w, http.StatusBadRequest, "note_too_long",
+				fmt.Errorf("note is limited to %d characters", maxBookmarkNoteRunes))
+			return
+		}
 		b.Note = sql.NullString{String: note, Valid: true}
 	}
 	b, err = s.store.AddBookmark(r.Context(), b)
@@ -274,6 +284,48 @@ func (s *Server) handleAddBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toBookmarkDTO(b))
+}
+
+// handleUpdateBookmark edits a bookmark's note. Adding one at creation
+// time was already possible; without this there was no way to write a note
+// on a bookmark you had already dropped, which is when you usually know
+// what you wanted to say about it.
+func (s *Server) handleUpdateBookmark(w http.ResponseWriter, r *http.Request) {
+	bookID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_id", err)
+		return
+	}
+	bookmarkID, err := strconv.ParseInt(r.PathValue("bookmark_id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_bookmark_id", err)
+		return
+	}
+	var body struct {
+		Note string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_json", err)
+		return
+	}
+	note := strings.TrimSpace(body.Note)
+	if utf8.RuneCountInString(note) > maxBookmarkNoteRunes {
+		writeError(w, http.StatusBadRequest, "note_too_long",
+			fmt.Errorf("note is limited to %d characters", maxBookmarkNoteRunes))
+		return
+	}
+
+	u := currentUser(r)
+	b, err := s.store.UpdateBookmarkNote(r.Context(), u.ID, bookID, bookmarkID, note)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "not_found", errors.New("bookmark not found"))
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "update_bookmark", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toBookmarkDTO(b))
 }
 
 func (s *Server) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {

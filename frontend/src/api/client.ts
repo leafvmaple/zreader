@@ -317,6 +317,17 @@ export async function addBookmark(
   });
 }
 
+export async function updateBookmarkNote(
+  bookId: number,
+  bookmarkId: number,
+  note: string,
+): Promise<Bookmark> {
+  return request<Bookmark>(`/api/v1/books/${bookId}/bookmarks/${bookmarkId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ note }),
+  });
+}
+
 export async function deleteBookmark(bookId: number, bookmarkId: number): Promise<void> {
   await request<void>(`/api/v1/books/${bookId}/bookmarks/${bookmarkId}`, { method: 'DELETE' });
 }

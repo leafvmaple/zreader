@@ -432,6 +432,33 @@ try {
   ]);
   await page.waitForSelector('.bookmark-list li');
   assert((await page.locator('.bookmark-list li').count()) === 1, 'bookmark was not created');
+
+  // The note column, the API field and the type all existed with nothing
+  // able to write one. Notes are edited in place on the row.
+  const notePrompt = page.locator('.bookmark-list__note');
+  assert(await notePrompt.isVisible(), 'bookmark row has no place to write a note');
+  await notePrompt.click();
+  await page.locator('.bookmark-list__note-input').fill('记一笔 with spaces');
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes('/bookmarks/') && r.request().method() === 'PATCH' && r.status() === 200,
+    ),
+    page.keyboard.press('Enter'),
+  ]);
+  await page.waitForTimeout(300);
+  assert(
+    (await page.locator('.bookmark-list__note').innerText()).includes('记一笔 with spaces'),
+    'the note did not survive being saved',
+  );
+  // And it has to still be there after a reload, not just in local state.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('.reader__article');
+  await page.locator('.reader__bottom button.reader__icon-btn').nth(1).click();
+  await page.waitForSelector('.bookmark-list li');
+  assert(
+    (await page.locator('.bookmark-list__note').innerText()).includes('记一笔 with spaces'),
+    'the note was not persisted',
+  );
   await page.keyboard.press('Escape');
 
   // Settings now lives in the bottom bar (TOC=0, bookmarks=1, settings=2).

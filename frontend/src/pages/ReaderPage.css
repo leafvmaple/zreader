@@ -723,10 +723,43 @@
   width: 100%;
 }
 
-.bookmark-list li {
+/* The jump target and the delete button share a row; the note sits under
+   them on its own line, where a long one can wrap without squeezing the
+   chapter title into a column two characters wide. */
+.bookmark-list__row {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: stretch;
+}
+
+.bookmark-list__note,
+.bookmark-list__note-input {
+  display: block;
+  width: calc(100% - 36px);
+  margin: 0 18px 12px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: var(--r-overlay);
+  color: var(--r-fg);
+  cursor: text;
+}
+
+.bookmark-list__note:hover { border-color: var(--r-overlay-strong); }
+
+/* The prompt has to read as an invitation, not as a note someone wrote. */
+.bookmark-list__note.is-empty {
+  background: transparent;
+  color: var(--r-fg-muted);
+  font-style: italic;
+}
+
+.bookmark-list__note-input {
+  border-color: var(--r-accent);
+  outline: none;
 }
 
 .bookmark-list__delete {

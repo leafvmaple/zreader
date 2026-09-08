@@ -60,6 +60,36 @@ func (s *Store) AddBookmark(ctx context.Context, b Bookmark) (Bookmark, error) {
 	return b, nil
 }
 
+// UpdateBookmarkNote replaces one bookmark's note and returns the row as
+// it now stands. An empty note clears it back to NULL, so "no note" is one
+// state rather than two.
+//
+// Scoped by user and book like every other bookmark call: the id alone
+// would let one account edit another's note by guessing a number.
+func (s *Store) UpdateBookmarkNote(ctx context.Context, userID string, bookID, bookmarkID int64, note string) (Bookmark, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE bookmarks SET note = ? WHERE id = ? AND user_id = ? AND book_id = ?`,
+		nullString(note), bookmarkID, userID, bookID,
+	)
+	if err != nil {
+		return Bookmark{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Bookmark{}, sql.ErrNoRows
+	}
+
+	var b Bookmark
+	err = s.db.QueryRowContext(ctx, `
+        SELECT id, user_id, book_id, char_offset, chapter_idx, note, created_at
+          FROM bookmarks WHERE id = ? AND user_id = ? AND book_id = ?`,
+		bookmarkID, userID, bookID,
+	).Scan(&b.ID, &b.UserID, &b.BookID, &b.CharOffset, &b.ChapterIdx, &b.Note, &b.CreatedAt)
+	if err != nil {
+		return Bookmark{}, err
+	}
+	return b, nil
+}
+
 // DeleteBookmark removes one bookmark belonging to the given user/book.
 func (s *Store) DeleteBookmark(ctx context.Context, userID string, bookID, bookmarkID int64) error {
 	res, err := s.db.ExecContext(ctx,

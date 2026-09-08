@@ -561,6 +561,8 @@ export function ReaderPage() {
   // result, cleared by any other kind of jump so it does not linger over
   // reading you did afterwards.
   const [highlightTerm, setHighlightTerm] = useState('');
+  // The bookmark whose note is open for editing, if any.
+  const [editingNote, setEditingNote] = useState<number | null>(null);
   const [searchNext, setSearchNext] = useState<number | null>(null);
   // Percentage being dragged on the footer progress bar, or null when
   // not scrubbing. Kept separate from `pct` so the bar tracks the finger
@@ -1266,6 +1268,25 @@ export function ReaderPage() {
     }
   }, [book, bookId, currentChapter]);
 
+  // Notes are edited in place rather than at creation: you drop a bookmark
+  // mid-sentence and know what you wanted to say about it a moment later,
+  // and the column, the API and the type all supported one already — there
+  // was simply nowhere to type it.
+  const onSaveBookmarkNote = useCallback(
+    async (bookmarkId: number, note: string) => {
+      setEditingNote(null);
+      const current = bookmarks.find((b) => b.id === bookmarkId);
+      if (!current || (current.note ?? '') === note) return;
+      try {
+        const updated = await api.updateBookmarkNote(bookId, bookmarkId, note);
+        setBookmarks((prev) => prev.map((b) => (b.id === bookmarkId ? updated : b)));
+      } catch (err) {
+        setSearchMsg(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [bookId, bookmarks],
+  );
+
   const onDeleteBookmark = useCallback(
     async (bookmarkId: number) => {
       try {
@@ -1732,13 +1753,40 @@ export function ReaderPage() {
                     `位置 ${b.char_offset.toLocaleString()}`;
                   return (
                     <li key={b.id}>
-                      <button className="bookmark-list__jump" onClick={() => onBookmarkClick(b.char_offset)}>
-                        <span>{chapterTitle}</span>
-                        <small>{b.char_offset.toLocaleString()} 字</small>
-                      </button>
-                      <button className="bookmark-list__delete" onClick={() => void onDeleteBookmark(b.id)}>
-                        删除
-                      </button>
+                      <div className="bookmark-list__row">
+                        <button className="bookmark-list__jump" onClick={() => onBookmarkClick(b.char_offset)}>
+                          <span>{chapterTitle}</span>
+                          <small>{b.char_offset.toLocaleString()} 字</small>
+                        </button>
+                        <button className="bookmark-list__delete" onClick={() => void onDeleteBookmark(b.id)}>
+                          删除
+                        </button>
+                      </div>
+                      {editingNote === b.id ? (
+                        <input
+                          autoFocus
+                          className="bookmark-list__note-input"
+                          defaultValue={b.note ?? ''}
+                          maxLength={500}
+                          placeholder="写点什么…"
+                          onBlur={(e) => void onSaveBookmarkNote(b.id, e.target.value.trim())}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                            if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              setEditingNote(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className={`bookmark-list__note${b.note ? '' : ' is-empty'}`}
+                          onClick={() => setEditingNote(b.id)}
+                        >
+                          {b.note || '添加备注'}
+                        </button>
+                      )}
                     </li>
                   );
                 })}

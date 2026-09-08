@@ -632,3 +632,90 @@ func TestSearchPagesThroughMatches(t *testing.T) {
 		t.Errorf("saw %d distinct hits across the pages, want 30", len(seen))
 	}
 }
+
+// Notes could be set when a bookmark was created and never afterwards,
+// which is the wrong way round: you drop the bookmark first and know what
+// to say about it a moment later.
+func TestBookmarkNoteCanBeEditedAndScoped(t *testing.T) {
+	ctx := context.Background()
+	srv, st := newAuthTestServer(t)
+	bookID := seedBook(t, st)
+
+	mine, err := st.CreateUser(ctx, "mine", "correct-horse", store.RoleAdmin)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	other, err := st.CreateUser(ctx, "other", "correct-horse", store.RoleUser)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	tokenMine, _, _ := st.CreateSession(ctx, mine.ID)
+	tokenOther, _, _ := st.CreateSession(ctx, other.ID)
+	cMine := &http.Cookie{Name: sessionCookie, Value: tokenMine}
+	cOther := &http.Cookie{Name: sessionCookie, Value: tokenOther}
+
+	rr := do(t, srv, http.MethodPost, fmt.Sprintf("/api/v1/books/%d/bookmarks", bookID),
+		map[string]any{"char_offset": 10, "chapter_idx": 1}, cMine)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create bookmark = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		ID   int64  `json:"id"`
+		Note string `json:"note"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if created.Note != "" {
+		t.Errorf("new bookmark already has note %q", created.Note)
+	}
+
+	path := fmt.Sprintf("/api/v1/books/%d/bookmarks/%d", bookID, created.ID)
+	rr = do(t, srv, http.MethodPatch, path, map[string]any{"note": "  记一笔  "}, cMine)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch note = %d body=%s", rr.Code, rr.Body.String())
+	}
+	// A fresh value per decode: the DTO omits an empty note, and unmarshal
+	// leaves absent fields as they were.
+	noteOf := func(body []byte) string {
+		t.Helper()
+		var out struct {
+			Note string `json:"note"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out.Note
+	}
+	if got := noteOf(rr.Body.Bytes()); got != "记一笔" {
+		t.Errorf("note = %q, want it trimmed to 记一笔", got)
+	}
+
+	// An empty note clears rather than storing a blank string, so "no note"
+	// stays one state.
+	rr = do(t, srv, http.MethodPatch, path, map[string]any{"note": ""}, cMine)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("clear note = %d", rr.Code)
+	}
+	if got := noteOf(rr.Body.Bytes()); got != "" {
+		t.Errorf("note = %q after clearing, want empty", got)
+	}
+
+	// Another account must not reach it by guessing the id.
+	rr = do(t, srv, http.MethodPatch, path, map[string]any{"note": "not yours"}, cOther)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("cross-account patch = %d, want 404", rr.Code)
+	}
+
+	// The cap applies to both the create and the edit path.
+	long := strings.Repeat("字", 501)
+	rr = do(t, srv, http.MethodPatch, path, map[string]any{"note": long}, cMine)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("over-long note on patch = %d, want 400", rr.Code)
+	}
+	rr = do(t, srv, http.MethodPost, fmt.Sprintf("/api/v1/books/%d/bookmarks", bookID),
+		map[string]any{"char_offset": 20, "note": long}, cMine)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("over-long note on create = %d, want 400", rr.Code)
+	}
+}
