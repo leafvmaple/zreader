@@ -3,30 +3,20 @@ import type { MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as api from '../api/client';
 import { ReaderDrawer } from '../components/ReaderDrawer';
+import { ReaderSearch } from '../components/ReaderSearch';
+import { ReaderSettings } from '../components/ReaderSettings';
 import { TOCList } from '../components/ReaderTOC';
 import {
-  BUILTIN_FONTS,
   DEFAULT_SETTINGS,
-  GAP_LABELS,
   HINT_KEY,
-  LINE_LABELS,
   SETTINGS_KEY,
-  THEME_SWATCHES,
-  WIDTH_LABELS,
   loadSettings,
   resolveTheme,
   saveSettings,
 } from '../reader/settings';
-import type {
-  FontSize,
-  IndentMode,
-  LineHeight,
-  PageWidth,
-  ParagraphGap,
-  Settings,
-} from '../reader/settings';
+import type { Settings } from '../reader/settings';
 import { useThrottledProgress } from '../hooks/useThrottledProgress';
-import type { Book, Bookmark, Chapter, Progress, ReadingFont, SearchMatch } from '../types/api';
+import type { Book, Bookmark, Chapter, Progress, ReadingFont } from '../types/api';
 import './ReaderPage.css';
 
 // Consistent line-icon set for the reader chrome — replaces the earlier mix
@@ -327,18 +317,14 @@ export function ReaderPage() {
   };
   const [pct, setPct] = useState(0);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
-  const [searchBusy, setSearchBusy] = useState(false);
-  const [searchMsg, setSearchMsg] = useState<string | null>(null);
-  const [searchTotal, setSearchTotal] = useState(0);
+  // Bookmark failures used to report through the search drawer's message.
+  const [bookmarkMsg, setBookmarkMsg] = useState<string | null>(null);
   // The term to mark in the rendered text. Set when following a search
   // result, cleared by any other kind of jump so it does not linger over
   // reading you did afterwards.
   const [highlightTerm, setHighlightTerm] = useState('');
   // The bookmark whose note is open for editing, if any.
   const [editingNote, setEditingNote] = useState<number | null>(null);
-  const [searchNext, setSearchNext] = useState<number | null>(null);
   // Percentage being dragged on the footer progress bar, or null when
   // not scrubbing. Kept separate from `pct` so the bar tracks the finger
   // immediately while the (async, chapter-loading) jump only fires on
@@ -386,8 +372,7 @@ export function ReaderPage() {
     setChapterText(new Map());
     setLoadedRange(null);
     setBookmarks([]);
-    setSearchResults([]);
-    setSearchMsg(null);
+    setBookmarkMsg(null);
     setCurrentOffset(0);
     initialised.current = false;
     fetchingRef.current.clear();
@@ -980,48 +965,14 @@ export function ReaderPage() {
     [chapters, jumpToOffset],
   );
 
-  // `from` is a character offset, not a page number: the server resumes
-  // the scan there. Passing 0 starts a new search and replaces the list;
-  // anything else appends, so paging keeps what you have already seen.
-  const runSearch = useCallback(
-    async (from: number) => {
-      const q = searchQuery.trim();
-      if (!q) {
-        setSearchMsg('请输入搜索内容');
-        setSearchResults([]);
-        setSearchTotal(0);
-        setSearchNext(null);
-        return;
-      }
-      setSearchBusy(true);
-      setSearchMsg(null);
-      try {
-        const page = await api.searchBook(bookId, q, { from });
-        setSearchResults((prev) => (from === 0 ? page.matches : [...prev, ...page.matches]));
-        setSearchTotal(page.total);
-        setSearchNext(page.next_from ?? null);
-        if (from === 0 && page.matches.length === 0) {
-          setSearchMsg('没有匹配结果');
-        }
-      } catch (err) {
-        setSearchMsg(err instanceof Error ? err.message : String(err));
-      } finally {
-        setSearchBusy(false);
-      }
-    },
-    [bookId, searchQuery],
-  );
-
-  const onSearch = useCallback(() => runSearch(0), [runSearch]);
-
   const onSearchResultClick = useCallback(
-    (offset: number) => {
+    (offset: number, term: string) => {
       setShowSearch(false);
-      setHighlightTerm(searchQuery.trim());
+      setHighlightTerm(term);
       centreOnHitRef.current = true;
       void jumpToOffset(offset);
     },
-    [jumpToOffset, searchQuery],
+    [jumpToOffset],
   );
 
   const onAddBookmark = useCallback(async () => {
@@ -1034,7 +985,7 @@ export function ReaderPage() {
       setBookmarks((prev) => [...prev, b].sort((a, b) => a.char_offset - b.char_offset));
       setShowBookmarks(true);
     } catch (err) {
-      setSearchMsg(err instanceof Error ? err.message : String(err));
+      setBookmarkMsg(err instanceof Error ? err.message : String(err));
     }
   }, [book, bookId, currentChapter]);
 
@@ -1051,7 +1002,7 @@ export function ReaderPage() {
         const updated = await api.updateBookmarkNote(bookId, bookmarkId, note);
         setBookmarks((prev) => prev.map((b) => (b.id === bookmarkId ? updated : b)));
       } catch (err) {
-        setSearchMsg(err instanceof Error ? err.message : String(err));
+        setBookmarkMsg(err instanceof Error ? err.message : String(err));
       }
     },
     [bookId, bookmarks],
@@ -1063,7 +1014,7 @@ export function ReaderPage() {
         await api.deleteBookmark(bookId, bookmarkId);
         setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId));
       } catch (err) {
-        setSearchMsg(err instanceof Error ? err.message : String(err));
+        setBookmarkMsg(err instanceof Error ? err.message : String(err));
       }
     },
     [bookId],
@@ -1413,51 +1364,11 @@ export function ReaderPage() {
             title="搜索"
             onClose={() => setShowSearch(false)}
           >
-          <form
-            className="reader-search"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void onSearch();
-            }}
-          >
-            <input
-              autoFocus
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索正文"
-            />
-            <button type="submit" disabled={searchBusy}>
-              {searchBusy ? '搜索中…' : '搜索'}
-            </button>
-          </form>
-          {searchMsg && <div className="drawer__message">{searchMsg}</div>}
-          {searchTotal > 0 && (
-            <div className="search-results__count">
-              共 {searchTotal} 处，已显示 {searchResults.length}
-            </div>
-          )}
-          <ul className="search-results">
-            {searchResults.map((m) => (
-              <li key={`${m.char_offset}-${m.chapter_idx}`}>
-                <button onClick={() => onSearchResultClick(m.char_offset)}>
-                  <span className="search-results__chapter">
-                    {chapters.find((c) => c.idx === m.chapter_idx)?.title ?? `第 ${m.chapter_idx} 章`}
-                  </span>
-                  <span className="search-results__snippet">{m.snippet}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {searchNext !== null && (
-            <button
-              type="button"
-              className="search-results__more"
-              disabled={searchBusy}
-              onClick={() => void runSearch(searchNext)}
-            >
-              {searchBusy ? '加载中…' : '加载更多'}
-            </button>
-          )}
+          <ReaderSearch
+            bookId={bookId}
+            chapters={chapters}
+            onSelect={onSearchResultClick}
+          />
         </ReaderDrawer>
       )}
 
@@ -1472,6 +1383,7 @@ export function ReaderPage() {
               添加当前位置
             </button>
           </div>
+          {bookmarkMsg && <div className="drawer__message">{bookmarkMsg}</div>}
           {bookmarks.length === 0 ? (
             <div className="drawer__message">还没有书签</div>
           ) : (
@@ -1530,139 +1442,12 @@ export function ReaderPage() {
             title="阅读设置"
             onClose={() => setShowSettings(false)}
           >
-          <div className="settings">
-            <div className="settings__row">
-              <span className="settings__label">主题</span>
-              <div className="settings__themes">
-                {THEME_SWATCHES.map((t) => (
-                  <button
-                    key={t.key}
-                    className={`theme-swatch theme-swatch--${t.key}${settings.theme === t.key ? ' is-active' : ''}`}
-                    onClick={() => setSettings((s) => ({ ...s, theme: t.key }))}
-                    aria-label={t.label}
-                    aria-pressed={settings.theme === t.key}
-                    title={t.label}
-                  />
-                ))}
-              </div>
-            </div>
-            <div className="settings__row">
-              <span className="settings__label">字号</span>
-              <div className="settings__sizes">
-                {(['sm', 'md', 'lg', 'xl'] as FontSize[]).map((sz) => (
-                  <button
-                    key={sz}
-                    className={`size-btn size-btn--${sz}${settings.size === sz ? ' is-active' : ''}`}
-                    aria-pressed={settings.size === sz}
-                    onClick={() => setSettings((s) => ({ ...s, size: sz }))}
-                  >
-                    A
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="settings__row">
-              <span className="settings__label">字体</span>
-              <div className="settings__fonts">
-                {BUILTIN_FONTS.map((f) => (
-                  <button
-                    key={f.key}
-                    className={`font-btn font-btn--${f.key}${settings.font === f.key ? ' is-active' : ''}`}
-                    aria-pressed={settings.font === f.key}
-                    onClick={() => setSettings((s) => ({ ...s, font: f.key }))}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-              {customFonts.length > 0 && (
-                <div className="settings__fonts settings__fonts--custom">
-                  {customFonts.map((f) => (
-                    <button
-                      key={f.file}
-                      className={`font-btn font-btn--custom${
-                        settings.font === 'custom' && settings.customFont === f.file ? ' is-active' : ''
-                      }`}
-                      onClick={() => setSettings((s) => ({ ...s, font: 'custom', customFont: f.file }))}
-                      title={f.name}
-                    >
-                      {f.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <p className="settings__hint">
-                内置字体全部来自系统，不联网。把 woff2 / ttf 放进 <code>&lt;data&gt;/fonts</code> 可以加入这个列表。
-              </p>
-            </div>
-            <div className="settings__row">
-              <span className="settings__label">行距</span>
-              <div className="settings__seg">
-                {(['compact', 'normal', 'loose'] as LineHeight[]).map((v) => (
-                  <button
-                    key={v}
-                    className={settings.line === v ? 'is-active' : ''}
-                    aria-pressed={settings.line === v}
-                    onClick={() => setSettings((s) => ({ ...s, line: v }))}
-                  >
-                    {LINE_LABELS[v]}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="settings__row">
-              <span className="settings__label">段距</span>
-              <div className="settings__seg">
-                {(['compact', 'normal', 'loose'] as ParagraphGap[]).map((v) => (
-                  <button
-                    key={v}
-                    className={settings.gap === v ? 'is-active' : ''}
-                    aria-pressed={settings.gap === v}
-                    onClick={() => setSettings((s) => ({ ...s, gap: v }))}
-                  >
-                    {GAP_LABELS[v]}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="settings__row">
-              <span className="settings__label">版面</span>
-              <div className="settings__seg">
-                {(['narrow', 'normal', 'wide'] as PageWidth[]).map((v) => (
-                  <button
-                    key={v}
-                    className={settings.width === v ? 'is-active' : ''}
-                    aria-pressed={settings.width === v}
-                    onClick={() => setSettings((s) => ({ ...s, width: v }))}
-                  >
-                    {WIDTH_LABELS[v]}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="settings__row">
-              <span className="settings__label">首行缩进</span>
-              <div className="settings__seg">
-                {(['indent', 'flush'] as IndentMode[]).map((v) => (
-                  <button
-                    key={v}
-                    className={settings.indent === v ? 'is-active' : ''}
-                    aria-pressed={settings.indent === v}
-                    onClick={() => setSettings((s) => ({ ...s, indent: v }))}
-                  >
-                    {v === 'indent' ? '开启' : '关闭'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="settings__reset"
-              onClick={onResetSettings}
-            >
-              恢复默认设置
-            </button>
-          </div>
+          <ReaderSettings
+            settings={settings}
+            setSettings={setSettings}
+            customFonts={customFonts}
+            onReset={onResetSettings}
+          />
         </ReaderDrawer>
       )}
     </div>
