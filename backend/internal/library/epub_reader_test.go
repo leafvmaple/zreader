@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // writeEpubToTemp builds the EPUB into a temp file and returns its path.
@@ -276,8 +277,13 @@ func TestGetFlatTextViewCachesDerivedViews(t *testing.T) {
 	if !strings.Contains(view.Text, "TARGET") {
 		t.Fatalf("Text = %q, want flat text", view.Text)
 	}
-	if !strings.Contains(view.LowerText, "target") {
-		t.Fatalf("LowerText = %q, want lower-cased flat text", view.LowerText)
+	if !strings.Contains(view.FoldedText, "target") {
+		t.Fatalf("FoldedText = %q, want case-folded flat text", view.FoldedText)
+	}
+	// The whole search path depends on this: a rune offset found in the
+	// folded text is a rune offset into the book.
+	if got, want := utf8.RuneCountInString(view.FoldedText), utf8.RuneCountInString(view.Text); got != want {
+		t.Fatalf("FoldedText has %d runes, Text has %d — offsets would not line up", got, want)
 	}
 	if got, want := string(view.Runes), view.Text; got != want {
 		t.Fatalf("Runes reconstruct %q, want %q", got, want)
@@ -289,5 +295,33 @@ func TestGetFlatTextViewCachesDerivedViews(t *testing.T) {
 	}
 	if again != view {
 		t.Fatalf("GetFlatTextView did not reuse cached view")
+	}
+}
+
+// Chinese text is full of full-width punctuation, so an ASCII "!" typed
+// into the search box has to find "！". The fold must stay rune-for-rune
+// while doing it, or every match offset after the first folded character
+// would point somewhere else.
+func TestFoldForSearchIsRuneForRune(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"ＡＢＣ", "abc"},
+		{"１２３", "123"},
+		{"（甲）！？", "(甲)!?"},
+		{"MiXeD Case", "mixed case"},
+		{"甲乙丙丁", "甲乙丙丁"},
+		// Full-width forms that have a narrow counterpart fold to it, so
+		// an ASCII comma typed into the box finds one in the text.
+		{"，！？：；", ",!?:;"},
+		// CJK punctuation with no narrow counterpart is left as written.
+		{"。、「」", "。、「」"},
+	}
+	for _, tc := range cases {
+		got := FoldStringForSearch(tc.in)
+		if got != tc.want {
+			t.Errorf("FoldStringForSearch(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if a, b := utf8.RuneCountInString(got), utf8.RuneCountInString(tc.in); a != b {
+			t.Errorf("FoldStringForSearch(%q) changed the rune count: %d -> %d", tc.in, b, a)
+		}
 	}
 }

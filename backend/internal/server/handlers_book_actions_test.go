@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -717,5 +718,91 @@ func TestBookmarkNoteCanBeEditedAndScoped(t *testing.T) {
 		map[string]any{"char_offset": 20, "note": long}, cMine)
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("over-long note on create = %d, want 400", rr.Code)
+	}
+}
+
+// Folding is only useful if the offsets survive it: a full-width comma is
+// three bytes and its folded form is one, so scanning the folded text and
+// reporting its byte positions would land every hit in the wrong place.
+func TestSearchFoldsWidthAndCaseWithoutMovingOffsets(t *testing.T) {
+	ctx := context.Background()
+	bookDir := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	srv := New(Config{Port: 0, Store: st})
+
+	// Full-width punctuation ahead of the hit is what would shift a
+	// byte-based offset; the marker itself is deliberately mixed-case.
+	body := "第一章 甲乙\n\n" +
+		"甲乙丙丁，戊己庚辛！壬癸子丑？寅卯辰巳（午未）申酉戌亥。\n\n" +
+		"这一段里有 MiXeDcase 这个词。\n\n" +
+		"甲乙丙丁，戊己庚辛！再来一次。\n"
+	uploadTestBook(t, srv, "BookA - AuthorX.txt", body)
+	book := onlyBook(t, st, folder.ID)
+
+	search := func(q string) []struct {
+		CharOffset int64  `json:"char_offset"`
+		Snippet    string `json:"snippet"`
+	} {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/books/"+itoa(book.ID)+"/search?q="+url.QueryEscape(q), nil)
+		rr := httptest.NewRecorder()
+		testRouter(t, srv).ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("search %q = %d body=%s", q, rr.Code, rr.Body.String())
+		}
+		var out struct {
+			Matches []struct {
+				CharOffset int64  `json:"char_offset"`
+				Snippet    string `json:"snippet"`
+			} `json:"matches"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out.Matches
+	}
+
+	// An ASCII comma finds the full-width one.
+	if got := search(","); len(got) != 2 {
+		t.Errorf("searching \",\" found %d hits, want the 2 full-width commas", len(got))
+	}
+	// And the full-width one finds itself.
+	if got := search("，"); len(got) != 2 {
+		t.Errorf("searching \"，\" found %d hits, want 2", len(got))
+	}
+	// Case folds both ways.
+	if got := search("mixedcase"); len(got) != 1 {
+		t.Errorf("case-folded search found %d hits, want 1", len(got))
+	}
+
+	// The offsets must still point at the text they claim to. Read the
+	// book back through the content endpoint at the reported offset and
+	// check the term is actually there.
+	hits := search("再来一次")
+	if len(hits) != 1 {
+		t.Fatalf("found %d hits for the tail phrase, want 1", len(hits))
+	}
+	req := httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/api/v1/books/%d/content?from=%d&len=8", book.ID, hits[0].CharOffset), nil)
+	rr := httptest.NewRecorder()
+	testRouter(t, srv).ServeHTTP(rr, req)
+	var slice struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &slice); err != nil {
+		t.Fatalf("decode content: %v", err)
+	}
+	if !strings.HasPrefix(slice.Text, "再来一次") {
+		t.Errorf("offset %d reads %q, want it to start at 再来一次 — folding moved the offsets",
+			hits[0].CharOffset, slice.Text)
 	}
 }

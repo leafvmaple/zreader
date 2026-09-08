@@ -33,7 +33,10 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/width"
 )
 
 // EpubBook is the parsed-from-disk view of an EPUB. Chapter offsets
@@ -442,12 +445,44 @@ var (
 
 // FlatTextView stores cached, derived views over the EPUB's flat text.
 //
-// Text, LowerText, and Runes are shared with the cache; callers MUST treat
+// Text, FoldedText, and Runes are shared with the cache; callers MUST treat
 // them as immutable.
 type FlatTextView struct {
-	Text      string
-	LowerText string
-	Runes     []rune
+	Text string
+	// FoldedText is Text with each rune folded for searching. It has the
+	// same runes in the same order as Text — one rune in, one rune out —
+	// so a rune offset found in it is a rune offset into the book. Byte
+	// offsets are NOT interchangeable: a full-width comma is three bytes
+	// and its folded form is one.
+	FoldedText string
+	Runes      []rune
+}
+
+// FoldForSearch folds one rune for search matching: full-width forms to
+// their narrow equivalents, then lower case.
+//
+// Deliberately rune-for-rune rather than a string transformer. Chinese
+// text is full of full-width punctuation — 1.59M characters across the
+// test corpus — so someone typing an ASCII "!" should find "！"; but the
+// match offsets are what the reader jumps to, and a transformer that ever
+// emitted a different number of runes would shift every hit after it.
+// width.Properties.Folded is 1:1 by construction, and a rune with no
+// folding is left alone.
+func FoldForSearch(r rune) rune {
+	if f := width.LookupRune(r).Folded(); f != 0 {
+		r = f
+	}
+	return unicode.ToLower(r)
+}
+
+// FoldStringForSearch folds a whole string with FoldForSearch.
+func FoldStringForSearch(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		b.WriteRune(FoldForSearch(r))
+	}
+	return b.String()
 }
 
 // GetFlatTextView returns the flat plain-text reconstruction of an EPUB plus
@@ -479,9 +514,9 @@ func GetFlatTextView(epubPath string) (*FlatTextView, error) {
 		return nil, err
 	}
 	view := &FlatTextView{
-		Text:      book.FlatText,
-		LowerText: strings.ToLower(book.FlatText),
-		Runes:     []rune(book.FlatText),
+		Text:       book.FlatText,
+		FoldedText: FoldStringForSearch(book.FlatText),
+		Runes:      []rune(book.FlatText),
 	}
 
 	flatCacheMu.Lock()

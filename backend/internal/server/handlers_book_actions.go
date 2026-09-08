@@ -117,13 +117,18 @@ func (s *Server) handleSearchBook(w http.ResponseWriter, r *http.Request) {
 // utf8.RuneCountInString(view.Text[:byteStart]) per match — a scan from
 // byte zero every time, which is invisible when the hits are near the
 // front and 290 ms on a 7.4M-character book when they are near the back.
+//
+// Scanning happens entirely in the folded text. Its byte offsets are its
+// own — folding changes byte lengths — but its rune offsets are the
+// book's, because the fold is one rune in, one rune out. Snippets are cut
+// from the original runes, so what is shown is what is written.
 func searchBookText(
 	view *library.FlatTextView,
 	query string,
 	chapters []store.Chapter,
 	from, limit int,
 ) (matches []searchMatchDTO, nextFrom int, total int) {
-	lowerQuery := strings.ToLower(query)
+	foldedQuery := library.FoldStringForSearch(query)
 	queryRunes := utf8.RuneCountInString(query)
 	if queryRunes == 0 {
 		return nil, 0, 0
@@ -133,14 +138,14 @@ func searchBookText(
 	byteCursor := 0
 	charCursor := 0
 	for {
-		i := strings.Index(view.LowerText[byteCursor:], lowerQuery)
+		i := strings.Index(view.FoldedText[byteCursor:], foldedQuery)
 		if i < 0 {
 			break
 		}
 		byteStart := byteCursor + i
 		// Advance the rune count over the bytes just skipped instead of
 		// counting the whole prefix again.
-		charStart := charCursor + utf8.RuneCountInString(view.Text[byteCursor:byteStart])
+		charStart := charCursor + utf8.RuneCountInString(view.FoldedText[byteCursor:byteStart])
 		total++
 
 		if charStart >= from {
@@ -155,7 +160,7 @@ func searchBookText(
 			}
 		}
 
-		_, size := utf8.DecodeRuneInString(view.Text[byteStart:])
+		_, size := utf8.DecodeRuneInString(view.FoldedText[byteStart:])
 		if size <= 0 {
 			break
 		}
