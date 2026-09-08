@@ -166,19 +166,30 @@ func (s *Server) handlePutProgress(w http.ResponseWriter, r *http.Request) {
 // atBookEnd reports whether a saved position is close enough to the end to
 // call the book finished.
 //
-// It cannot be an exact match. Progress is a linear pixel-to-character
-// estimate over the chapter's measured height, so the last screenful of
-// text maps to offsets before the chapter's true end — the reader can
-// scroll to the very bottom and still report short of the total. Measured
-// against real books at the very bottom of the last chapter: 467 short on
-// a 38k-character book, 772 short on a 495k one. The gap tracks one
-// viewport of text, not the book's length, which is why the slack has a
-// floor rather than being a flat percentage.
+// What "close enough" means depends on what the units are. For a
+// page-based book the position is a page index and it is exact: the last
+// page is the end, and nothing else is.
+//
+// For text it cannot be exact. Progress is a linear pixel-to-character
+// estimate over the chapter's measured height, so the last screenful maps
+// to offsets before the chapter's true end — scrolled to the very bottom
+// of the last chapter, a 38k-character book reported 467 short and a 495k
+// one 772 short. The gap tracks one viewport of text, not the book's
+// length, which is why the slack has a floor rather than being a flat
+// percentage.
 func atBookEnd(offset int64, book store.Book) bool {
 	if !book.CharCount.Valid || book.CharCount.Int64 <= 0 {
 		return false
 	}
 	total := book.CharCount.Int64
+
+	// An image PDF stores pages in both fields (see the scanner's
+	// pdf-image branch), where a character slack of a thousand is most of
+	// the book — it marked every PDF finished the moment it was opened.
+	if book.Format == "pdf-image" {
+		return offset >= total-1
+	}
+
 	slack := total / 100
 	if slack < progressEndSlackMin {
 		slack = progressEndSlackMin

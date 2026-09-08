@@ -245,3 +245,56 @@ func TestProgressWithoutCharCountNeverFinishes(t *testing.T) {
 		t.Errorf("status = %q, want reading", got)
 	}
 }
+
+// seedPagedBook is a pdf-image book, where both char_count and char_offset
+// hold page numbers rather than characters.
+func seedPagedBook(t *testing.T, st *store.Store, pages int64) int64 {
+	t.Helper()
+	ctx := context.Background()
+	folder, err := st.AddFolder(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	id, _, err := st.UpsertBook(ctx, store.Book{
+		FolderID:  folder.ID,
+		Path:      t.TempDir() + "/Scan.pdf",
+		Title:     "Scan",
+		Format:    "pdf-image",
+		CharCount: sql.NullInt64{Int64: pages, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("upsert book: %v", err)
+	}
+	return id
+}
+
+// The end-of-book slack is measured in characters, and a page-based book
+// counts in pages — a hundred-page scan is shorter than the slack, so
+// opening it at page one marked it finished.
+func TestProgressPagedBookFinishesOnlyAtTheLastPage(t *testing.T) {
+	srv, _, session := progressFixture(t)
+	st := srv.store
+	const pages = 100
+	bookID := seedPagedBook(t, st, pages)
+
+	do(t, srv, http.MethodPut, progressPath(bookID), map[string]any{
+		"char_offset": 0, "chapter_idx": 1, "chapter_offset": 0,
+	}, session)
+	if got := statusOf(t, st, bookID); got != store.ReadingStatusReading {
+		t.Errorf("page 1 of %d: status = %q, want reading", pages, got)
+	}
+
+	do(t, srv, http.MethodPut, progressPath(bookID), map[string]any{
+		"char_offset": 50, "chapter_idx": 51, "chapter_offset": 0,
+	}, session)
+	if got := statusOf(t, st, bookID); got != store.ReadingStatusReading {
+		t.Errorf("halfway: status = %q, want reading", got)
+	}
+
+	do(t, srv, http.MethodPut, progressPath(bookID), map[string]any{
+		"char_offset": pages - 1, "chapter_idx": pages, "chapter_offset": 0,
+	}, session)
+	if got := statusOf(t, st, bookID); got != store.ReadingStatusFinished {
+		t.Errorf("last page: status = %q, want finished", got)
+	}
+}
