@@ -3,6 +3,16 @@ import type { MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as api from '../api/client';
 import { ReaderDrawer } from '../components/ReaderDrawer';
+import {
+  IconBack,
+  IconBookmark,
+  IconBookmarkPlus,
+  IconChevronLeft,
+  IconChevronRight,
+  IconList,
+  IconSearch,
+  IconSettings,
+} from '../components/icons';
 import { ReaderSearch } from '../components/ReaderSearch';
 import { ReaderSettings } from '../components/ReaderSettings';
 import { TOCList } from '../components/ReaderTOC';
@@ -22,71 +32,6 @@ import './ReaderPage.css';
 // Consistent line-icon set for the reader chrome — replaces the earlier mix
 // of Chinese labels, emoji (☆ ⚙), and arrows so every control reads as part
 // of one toolbar.
-function Glyph({ children }: { children: React.ReactNode }) {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
-}
-
-const IconBack = () => (
-  <Glyph>
-    <path d="M15 5l-7 7 7 7" />
-  </Glyph>
-);
-const IconSearch = () => (
-  <Glyph>
-    <circle cx="11" cy="11" r="7" />
-    <path d="M20.5 20.5L16 16" />
-  </Glyph>
-);
-const IconBookmarkPlus = () => (
-  <Glyph>
-    <path d="M6 4h12v16l-6-4-6 4z" />
-    <path d="M12 8.5v4M10 10.5h4" />
-  </Glyph>
-);
-const IconBookmark = () => (
-  <Glyph>
-    <path d="M6 4h12v16l-6-4-6 4z" />
-  </Glyph>
-);
-const IconList = () => (
-  <Glyph>
-    <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />
-  </Glyph>
-);
-const IconSettings = () => (
-  <Glyph>
-    <path d="M4 7h7M15 7h5" />
-    <circle cx="13" cy="7" r="2" />
-    <path d="M4 12h4M12 12h8" />
-    <circle cx="10" cy="12" r="2" />
-    <path d="M4 17h11M19 17h1" />
-    <circle cx="17" cy="17" r="2" />
-  </Glyph>
-);
-const IconChevronLeft = () => (
-  <Glyph>
-    <path d="M15 6l-6 6 6 6" />
-  </Glyph>
-);
-const IconChevronRight = () => (
-  <Glyph>
-    <path d="M9 6l6 6-6 6" />
-  </Glyph>
-);
 
 // 'auto' follows the shelf's own light/dark choice; the rest are
 // explicit surfaces. See resolveTheme.

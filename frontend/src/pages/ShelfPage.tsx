@@ -7,6 +7,15 @@ import { APP_NAME } from '../brand';
 import { AccountMenu } from '../components/AccountMenu';
 import { ExportDialog } from '../components/ExportDialog';
 import { useColumnCount, useWindowedList } from '../hooks/useWindowedList';
+import {
+  IconMore,
+  IconPlus,
+  IconSearch,
+  IconSort,
+  IconStar,
+  IconTheme,
+  IconView,
+} from '../components/icons';
 import type { Book, DuplicateGroup, Folder, LibraryJob, Progress, ReadingStatus, Tag } from '../types/api';
 import './ShelfPage.css';
 
@@ -52,115 +61,6 @@ function applyTheme(mode: ThemeMode) {
   }
 }
 
-function ThemeIcon({ mode }: { mode: ThemeMode }) {
-  // Show the glyph for the mode you'd switch *to*.
-  if (mode === 'light') {
-    // moon
-    return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8Z"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-  // sun
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.7" />
-      <path
-        d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function ViewIcon({ mode }: { mode: ViewMode }) {
-  // Show the glyph for the view you'd switch *to*.
-  if (mode === 'list') {
-    // grid
-    return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-      </svg>
-    );
-  }
-  // list
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M20.5 20.5L16 16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function MoreIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="5" cy="12" r="1.6" fill="currentColor" />
-      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
-      <circle cx="19" cy="12" r="1.6" fill="currentColor" />
-    </svg>
-  );
-}
-
-function StarIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        d="M12 3.6l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"
-        fill={filled ? 'currentColor' : 'none'}
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function SortIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M7 4v16m0 0l-3-3.5M7 20l3-3.5M17 20V4m0 0l-3 3.5M17 4l3 3.5"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 // Menu is the popover behind the header's "⋯" button. It closes on
 // outside click, on Escape, and after any item fires — the three ways a
@@ -207,7 +107,7 @@ function Menu({
         aria-expanded={open}
         title={label}
       >
-        <MoreIcon />
+        <IconMore />
         {badge !== undefined && badge > 0 && <span className="shelf__badge">{badge}</span>}
       </button>
       {open && (
@@ -877,7 +777,7 @@ export function ShelfPage() {
       aria-pressed={b.favorite}
       title={b.favorite ? '取消收藏' : '收藏'}
     >
-      <StarIcon filled={b.favorite} />
+      <IconStar filled={b.favorite} />
     </button>
   );
 
@@ -891,7 +791,7 @@ export function ShelfPage() {
           </div>
 
           <div className="shelf__search-wrap">
-            <SearchIcon />
+            <IconSearch size={16} />
             <input
               type="search"
               placeholder="搜索书名 / 作者 / 标签"
@@ -914,7 +814,7 @@ export function ShelfPage() {
               aria-label="添加书籍"
               title="添加书籍"
             >
-              <PlusIcon />
+              <IconPlus />
             </button>
             <button
               type="button"
@@ -923,7 +823,7 @@ export function ShelfPage() {
               aria-label={view === 'grid' ? '切换到列表视图' : '切换到网格视图'}
               title={view === 'grid' ? '切换到列表视图' : '切换到网格视图'}
             >
-              <ViewIcon mode={view} />
+              <IconView mode={view} />
             </button>
             <button
               type="button"
@@ -932,7 +832,7 @@ export function ShelfPage() {
               aria-label={theme === 'dark' ? '切换到浅色' : '切换到深色'}
               title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
             >
-              <ThemeIcon mode={theme} />
+              <IconTheme mode={theme} />
             </button>
             <AccountMenu />
             <Menu label="更多" badge={duplicates.length}>
@@ -1001,7 +901,7 @@ export function ShelfPage() {
           </div>
 
           <label className="shelf__sort">
-            <SortIcon />
+            <IconSort />
             <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="排序方式">
               <option value="recent">最近阅读</option>
               <option value="added">最近添加</option>
