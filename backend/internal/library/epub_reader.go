@@ -359,25 +359,41 @@ func readChapterXHTML(z *zip.Reader, xhtmlPath string) (title string, paras []st
 			if capture != "" {
 				switch name {
 				case "br":
-					buf.WriteByte('\n')
-				case "img":
-					if alt := imageAltText(t); alt != "" {
-						if buf.Len() > 0 {
-							buf.WriteByte(' ')
+					// A line break inside a block becomes a paragraph
+					// break, which is what it means in the verse, letters
+					// and addresses that use it. It used to write '\n'
+					// into the buffer and collapseSpaces turned that back
+					// into a space a few lines later, so <br> did nothing
+					// at all. The MOBI reader has always split here; this
+					// makes the two agree.
+					//
+					// Not inside a heading: a title broken across two
+					// lines is still one title.
+					if isHTMLTextBlock(capture) {
+						if txt := strings.TrimSpace(collapseSpaces(buf.String())); txt != "" {
+							paras = append(paras, txt)
 						}
-						buf.WriteString("[Image: ")
-						buf.WriteString(alt)
-						buf.WriteString("]")
+						buf.Reset()
+					} else {
+						buf.WriteByte(' ')
 					}
+				case "img":
+					if buf.Len() > 0 {
+						buf.WriteByte(' ')
+					}
+					buf.WriteString(imageMarker(imageAltText(t)))
 				}
 			} else {
 				if isHTMLHeading(name) || isHTMLTextBlock(name) {
 					capture = name
 					buf.Reset()
 				} else if name == "img" {
-					if alt := imageAltText(t); alt != "" {
-						paras = append(paras, "[Image: "+alt+"]")
-					}
+					// Standalone illustrations get a marker whether or not
+					// they carry alt text. Dropping the ones without it
+					// meant an illustrated book's prose jumped without
+					// explanation — the reader shows text, so the honest
+					// thing is to say something was here.
+					paras = append(paras, imageMarker(imageAltText(t)))
 				}
 			}
 		case xml.EndElement:
@@ -417,6 +433,15 @@ func isHTMLTextBlock(name string) bool {
 	default:
 		return false
 	}
+}
+
+// imageMarker is what an image becomes in a text-only reader. The label
+// is Chinese because every other string the reader shows is.
+func imageMarker(alt string) string {
+	if alt = strings.TrimSpace(alt); alt != "" {
+		return "［图片：" + alt + "］"
+	}
+	return "［图片］"
 }
 
 func imageAltText(el xml.StartElement) string {

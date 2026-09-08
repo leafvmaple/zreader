@@ -126,14 +126,27 @@ func TestReadEpub_PreservesReadableRichBlocks(t *testing.T) {
 		t.Fatalf("ReadEpub: %v", err)
 	}
 	for _, want := range []string{
-		"Lead [Image: Map]",
+		// An image becomes a marker whether or not it carries alt text,
+		// because the reader shows text and the prose would otherwise
+		// jump with nothing to explain it.
+		"Lead ［图片：Map］",
 		"List item text",
 		"Footnote text",
-		"Line break text",
 	} {
 		if !strings.Contains(book.FlatText, want) {
 			t.Fatalf("FlatText missing %q:\n%s", want, book.FlatText)
 		}
+	}
+
+	// <br> is a paragraph break: the fixture's <p>Line<br/>break text</p>
+	// is two paragraphs, not one line with a space in it. It used to write
+	// a newline that collapseSpaces turned straight back into a space, so
+	// verse and letters lost every line they were written with.
+	if strings.Contains(book.FlatText, "Line break text") {
+		t.Errorf("<br> was collapsed to a space:\n%s", book.FlatText)
+	}
+	if !strings.Contains(book.FlatText, "Line\n\nbreak text") {
+		t.Errorf("<br> did not split into paragraphs:\n%s", book.FlatText)
 	}
 }
 
@@ -187,6 +200,52 @@ func writeRichEpubToTemp(t *testing.T) string {
 		t.Fatalf("close zip: %v", err)
 	}
 	return p
+}
+
+// writeEpubBody is writeRichEpubToTemp with the chapter body supplied by
+// the caller.
+func writeEpubBody(t *testing.T, p, body string) {
+	t.Helper()
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	if err := zipFile(zw, "META-INF/container.xml", containerXML()); err != nil {
+		t.Fatalf("container: %v", err)
+	}
+	if err := zipFile(zw, opfPath, `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>BodyBook</dc:title>
+    <dc:creator>AuthorX</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="chap1" href="xhtml/chap-0001.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="chap1"/></spine>
+</package>
+`); err != nil {
+		t.Fatalf("opf: %v", err)
+	}
+	if err := zipFile(zw, navPath, `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body>
+<nav><ol><li><a href="xhtml/chap-0001.xhtml">Chapter 1</a></li></ol></nav>
+</body></html>
+`); err != nil {
+		t.Fatalf("nav: %v", err)
+	}
+	if err := zipFile(zw, "EPUB/xhtml/chap-0001.xhtml",
+		`<?xml version="1.0" encoding="UTF-8"?>`+"\n"+
+			`<html xmlns="http://www.w3.org/1999/xhtml"><body>`+"\n"+body+"\n"+
+			`</body></html>`+"\n"); err != nil {
+		t.Fatalf("chapter: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
 }
 
 func TestReadEpub_OffsetsAreConsistent(t *testing.T) {
@@ -460,5 +519,31 @@ func TestFlatCacheKeepsAnOversizedBook(t *testing.T) {
 	}
 	if first != second {
 		t.Error("a book larger than the budget was evicted immediately and re-parsed")
+	}
+}
+
+// Verse is the reason <br> has to survive: every line of a poem is a <br>
+// away from the last, and collapsing them ran the whole thing together.
+func TestReadEpubSplitsVerseOnLineBreaks(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "verse.epub")
+	writeEpubBody(t, p, `<h1>标题<br/>的下半</h1>
+<p>甲乙丙丁<br/>戊己庚辛<br/>壬癸子丑</p>
+<p>末段。</p>`)
+
+	book, err := ReadEpub(p)
+	if err != nil {
+		t.Fatalf("ReadEpub: %v", err)
+	}
+	for _, want := range []string{"甲乙丙丁", "戊己庚辛", "壬癸子丑"} {
+		if !strings.Contains(book.FlatText, "\n"+want) && !strings.HasPrefix(book.FlatText, want) {
+			t.Errorf("verse line %q is not on its own line:\n%s", want, book.FlatText)
+		}
+	}
+	// A heading broken across two lines is still one heading, not two
+	// chapters — a <br> there is typesetting, not structure.
+	if len(book.Chapters) != 1 || book.Chapters[0].Title != "标题 的下半" {
+		t.Errorf("heading with a <br> became %+v, want one chapter titled 标题 的下半",
+			book.Chapters)
 	}
 }

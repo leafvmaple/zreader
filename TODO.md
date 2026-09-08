@@ -84,3 +84,25 @@ across 21 scroll steps.
 A single ResizeObserver now reports size changes, the ref callbacks are
 stable per index, and the same scroll costs 98. The behaviour that entry
 asked for was already there; what it cost is what got fixed.
+
+## Reader — EPUB inline markup is flattened
+
+`backend/internal/library/epub_reader.go`
+
+The flat text the reader serves is paragraphs and nothing else. `<br>`
+now splits paragraphs and images leave a marker, but bold, italic, lists
+and block quotes all arrive as identical paragraphs, and only the first
+heading in a file survives — as the chapter title. A second `<h2>` in the
+same chapter is dropped outright.
+
+This is not a bug in the reader so much as a property of the format
+between it and the parser. Everything downstream indexes that flat text:
+chapter detection is line-anchored on it, search offsets are rune
+positions into it, the reader's content endpoint slices it, and the AI
+export cleans it. Carrying markup means deciding what a "character
+offset" means when characters have markup around them, which is a change
+to the contract, not to one function.
+
+Worth doing if illustrated or heavily formatted books become common in a
+library. For prose — which is what this corpus is — flat is the right
+representation and the cheapest one.
