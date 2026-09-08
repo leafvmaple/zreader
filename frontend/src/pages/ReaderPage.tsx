@@ -177,6 +177,17 @@ const PREFETCH_TRIGGER = 1.0;
 const MAX_WINDOW_CHAPTERS = 12;
 const MIN_WINDOW_CHAPTERS = 4;
 const KEEP_ABOVE_VIEWPORTS = 3;
+
+// Chapters kept as text after they leave the DOM, so stepping back into
+// one costs a re-render and no network. Several times the mounted window,
+// because that is the whole point of keeping them — but bounded, since
+// otherwise a long session accumulates the entire book: measured at 1.6 MB
+// of JS heap per 220 chapters of the largest book in the corpus, which
+// extrapolates to tens of megabytes for reading it end to end.
+//
+// Evicting is safe by construction: every path that needs a chapter's text
+// already fetches it when the cache does not have it.
+const MAX_CACHED_CHAPTERS = 60;
 // Themes that existed before the palette was reworked, mapped to their
 // closest survivor. Without this an upgrading user lands on a class that
 // no longer exists and silently gets the stylesheet's fallback colours.
@@ -520,6 +531,31 @@ export function ReaderPage() {
   // Per-chapter content cache. We never evict — re-visiting a previously
   // read chapter via scroll-up or TOC jump is a memory hit, not a refetch.
   const [chapterText, setChapterText] = useState<Map<number, string>>(new Map());
+
+  // cacheChapter stores a chapter's text and drops whichever cached
+  // chapters are furthest from the one just read, so the cache tracks
+  // where the reader is rather than everywhere they have been.
+  const cacheChapter = useCallback((idx: number, text: string) => {
+    setChapterText((prev) => {
+      const next = new Map(prev).set(idx, text);
+      if (next.size <= MAX_CACHED_CHAPTERS) return next;
+      // Anything the window could be showing is off limits — evicting a
+      // mounted chapter's text would blank it mid-read. The arithmetic
+      // already protects them (the cache is several times the window, and
+      // eviction starts from the far end), but stating it means a future
+      // change to either bound cannot quietly break it.
+      const protectedRange = MAX_WINDOW_CHAPTERS;
+      const byDistance = [...next.keys()]
+        .filter((k) => Math.abs(k - idx) > protectedRange)
+        .sort((a, b) => Math.abs(b - idx) - Math.abs(a - idx));
+      for (const key of byDistance) {
+        if (next.size <= MAX_CACHED_CHAPTERS) break;
+        next.delete(key);
+      }
+      return next;
+    });
+  }, []);
+
   // Currently rendered contiguous window of chapter idxs. Null until the
   // first chapter lands. Always a contiguous range (TOC jumps reset it).
   const [loadedRange, setLoadedRange] = useState<{ lo: number; hi: number } | null>(null);
@@ -689,12 +725,7 @@ export function ReaderPage() {
           try {
             const t = await fetchChapter(bookId, idx, chapters, total);
             if (cancelled) return;
-            setChapterText((prev) => {
-              if (prev.has(idx)) return prev;
-              const next = new Map(prev);
-              next.set(idx, t);
-              return next;
-            });
+            cacheChapter(idx, t);
             // Only auto-extend on the trailing edge — appending below
             // current scroll never jumps the user's viewport.
             if (idx === targetIdx + 1) {
@@ -872,7 +903,7 @@ export function ReaderPage() {
     fetchingRef.current.add(next);
     try {
       const text = await fetchChapter(bookId, next, chapters, total);
-      setChapterText((prev) => new Map(prev).set(next, text));
+      cacheChapter(next, text);
       setLoadedRange((r) => (r && r.hi + 1 === next ? { ...r, hi: next } : r));
     } finally {
       fetchingRef.current.delete(next);
@@ -921,7 +952,7 @@ export function ReaderPage() {
     fetchingRef.current.add(prev);
     try {
       const text = await fetchChapter(bookId, prev, chapters, total);
-      setChapterText((p) => new Map(p).set(prev, text));
+      cacheChapter(prev, text);
       setLoadedRange((r) => (r && r.lo - 1 === prev ? { ...r, lo: prev } : r));
       requestAnimationFrame(compensate);
     } finally {
