@@ -321,6 +321,17 @@ function flattenTOC(nodes: TOCNode[], depth: number, out: TOCRow[]): TOCRow[] {
   return out;
 }
 
+// isTypingTarget reports whether a key event is destined for somewhere the
+// user is entering text. contentEditable is included for completeness even
+// though the reader has none today — the cost of missing one is a key that
+// silently does nothing.
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+}
+
 // MAX_TOC_DEPTH caps the per-depth CSS class for indent / typography.
 // Deeper levels still render — they just share styling with the last
 // styled depth. Three depths cover every shape our parser produces
@@ -1054,10 +1065,16 @@ export function ReaderPage() {
     const handler = (e: KeyboardEvent) => {
       const el = scrollRef.current;
       if (!el) return;
-      if (e.key === 'PageDown' || e.key === ' ' || e.key === 'ArrowDown') {
+      // Escape still belongs to the reader — it closes the drawer the
+      // field lives in — but every scrolling key must be left to whatever
+      // is being typed into. Without this, Space in the in-book search box
+      // paged the book and was swallowed by preventDefault, so a query
+      // with a space in it could not be typed at all.
+      if (e.key !== 'Escape' && isTypingTarget(e.target)) return;
+      if (e.key === 'PageDown' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowRight') {
         el.scrollBy({ top: el.clientHeight * 0.9, behavior: 'smooth' });
         e.preventDefault();
-      } else if (e.key === 'PageUp' || e.key === 'ArrowUp') {
+      } else if (e.key === 'PageUp' || e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
         el.scrollBy({ top: -el.clientHeight * 0.9, behavior: 'smooth' });
         e.preventDefault();
       } else if (e.key === 'Escape') {

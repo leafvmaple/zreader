@@ -385,6 +385,21 @@ try {
     searchHits = await page.locator('.search-results li').count();
   }
   assert(searchHits > 0, 'search did not return the reparsed text');
+
+  // The reader binds Space/arrows globally to page the book. Typing into
+  // the search box must still reach the box: a query with a space in it
+  // was previously impossible, because the global handler paged the book
+  // and preventDefault swallowed the keystroke.
+  const searchInput = page.locator('.reader-search input');
+  await searchInput.fill('');
+  await searchInput.click();
+  await page.keyboard.type('two words');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowRight');
+  assert(
+    (await searchInput.inputValue()) === 'two words',
+    `typing into the in-book search box lost keystrokes: ${JSON.stringify(await searchInput.inputValue())}`,
+  );
   await page.keyboard.press('Escape');
 
   await Promise.all([
