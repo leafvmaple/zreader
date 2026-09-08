@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -141,5 +142,106 @@ func TestProgressLegacyUpdatedAtStillWorks(t *testing.T) {
 	}, session)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("second legacy write = %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// seedSizedBook is seedBook plus a character count, which is what decides
+// whether a saved position counts as reaching the end.
+func seedSizedBook(t *testing.T, st *store.Store, chars int64) int64 {
+	t.Helper()
+	ctx := context.Background()
+	folder, err := st.AddFolder(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	id, _, err := st.UpsertBook(ctx, store.Book{
+		FolderID:  folder.ID,
+		Path:      t.TempDir() + "/BookB.epub",
+		Title:     "BookB",
+		Format:    "epub",
+		CharCount: sql.NullInt64{Int64: chars, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("upsert book: %v", err)
+	}
+	return id
+}
+
+func statusOf(t *testing.T, st *store.Store, id int64) string {
+	t.Helper()
+	b, err := st.GetBook(context.Background(), id)
+	if err != nil {
+		t.Fatalf("get book: %v", err)
+	}
+	return b.ReadingStatus
+}
+
+// A book read cover to cover used to stay "unread" on the shelf: the
+// column only ever moved when the reader edited it by hand.
+func TestProgressAdvancesReadingStatus(t *testing.T) {
+	srv, _, session := progressFixture(t)
+	st := srv.store
+	const total = 100_000
+	bookID := seedSizedBook(t, st, total)
+
+	if got := statusOf(t, st, bookID); got != store.ReadingStatusUnread {
+		t.Fatalf("fresh book status = %q, want unread", got)
+	}
+
+	do(t, srv, http.MethodPut, progressPath(bookID), map[string]any{
+		"char_offset": 5_000, "chapter_idx": 1, "chapter_offset": 0, "base_updated_at": 0,
+	}, session)
+	if got := statusOf(t, st, bookID); got != store.ReadingStatusReading {
+		t.Errorf("after reading 5%%: status = %q, want reading", got)
+	}
+
+	// Short of the end by more than the slack: still just reading.
+	do(t, srv, http.MethodPut, progressPath(bookID), map[string]any{
+		"char_offset": total - 5_000, "chapter_idx": 9, "chapter_offset": 0,
+	}, session)
+	if got := statusOf(t, st, bookID); got != store.ReadingStatusReading {
+		t.Errorf("5000 short of the end: status = %q, want reading", got)
+	}
+
+	// Within the slack — the reader cannot report the exact total, so this
+	// is what reaching the end actually looks like.
+	do(t, srv, http.MethodPut, progressPath(bookID), map[string]any{
+		"char_offset": total - 400, "chapter_idx": 10, "chapter_offset": 0,
+	}, session)
+	if got := statusOf(t, st, bookID); got != store.ReadingStatusFinished {
+		t.Errorf("at the end: status = %q, want finished", got)
+	}
+}
+
+// Both of these are things the reader said on purpose. Scrolling must not
+// overrule either.
+func TestProgressLeavesDeliberateStatusAlone(t *testing.T) {
+	for _, status := range []string{store.ReadingStatusPaused, store.ReadingStatusFinished} {
+		t.Run(status, func(t *testing.T) {
+			srv, _, session := progressFixture(t)
+			st := srv.store
+			bookID := seedSizedBook(t, st, 100_000)
+			if _, err := st.UpdateBookMetadata(context.Background(), bookID,
+				store.BookUpdate{ReadingStatus: &status}); err != nil {
+				t.Fatalf("set status: %v", err)
+			}
+			do(t, srv, http.MethodPut, progressPath(bookID), map[string]any{
+				"char_offset": 5_000, "chapter_idx": 1, "chapter_offset": 0,
+			}, session)
+			if got := statusOf(t, st, bookID); got != status {
+				t.Errorf("status = %q, want it left at %q", got, status)
+			}
+		})
+	}
+}
+
+// A book whose length is unknown has no end to reach.
+func TestProgressWithoutCharCountNeverFinishes(t *testing.T) {
+	srv, bookID, session := progressFixture(t)
+	do(t, srv, http.MethodPut, progressPath(bookID), map[string]any{
+		"char_offset": 999_999_999, "chapter_idx": 1, "chapter_offset": 0,
+	}, session)
+	if got := statusOf(t, srv.store, bookID); got != store.ReadingStatusReading {
+		t.Errorf("status = %q, want reading", got)
 	}
 }

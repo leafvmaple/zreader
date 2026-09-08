@@ -143,6 +143,17 @@ func (s *Server) handlePutProgress(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "put_progress", err)
 		return
 	}
+
+	// Reading a book is what should make it "in progress" and then
+	// "finished". The column only ever moved when the reader set it by
+	// hand, so a book read cover to cover still sat on the shelf as
+	// unread. Failure here is logged, not returned: the position is
+	// already saved and that is what the request was for.
+	if book, err := s.store.GetBook(r.Context(), bookID); err == nil {
+		if err := s.store.AdvanceReadingStatus(r.Context(), bookID, atBookEnd(p.CharOffset, book)); err != nil {
+			s.cfg.Logger.Printf("advance reading status for book %d: %v", bookID, err)
+		}
+	}
 	writeJSON(w, http.StatusOK, progressDTO{
 		BookID:        bookID,
 		CharOffset:    p.CharOffset,
@@ -151,3 +162,34 @@ func (s *Server) handlePutProgress(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:     p.UpdatedAt,
 	})
 }
+
+// atBookEnd reports whether a saved position is close enough to the end to
+// call the book finished.
+//
+// It cannot be an exact match. Progress is a linear pixel-to-character
+// estimate over the chapter's measured height, so the last screenful of
+// text maps to offsets before the chapter's true end — the reader can
+// scroll to the very bottom and still report short of the total. Measured
+// against real books at the very bottom of the last chapter: 467 short on
+// a 38k-character book, 772 short on a 495k one. The gap tracks one
+// viewport of text, not the book's length, which is why the slack has a
+// floor rather than being a flat percentage.
+func atBookEnd(offset int64, book store.Book) bool {
+	if !book.CharCount.Valid || book.CharCount.Int64 <= 0 {
+		return false
+	}
+	total := book.CharCount.Int64
+	slack := total / 100
+	if slack < progressEndSlackMin {
+		slack = progressEndSlackMin
+	}
+	if slack > progressEndSlackMax {
+		slack = progressEndSlackMax
+	}
+	return offset >= total-slack
+}
+
+const (
+	progressEndSlackMin = 1000
+	progressEndSlackMax = 3000
+)

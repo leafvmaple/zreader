@@ -324,6 +324,29 @@ type DuplicateGroup struct {
 	Books []Book
 }
 
+// AdvanceReadingStatus moves a book's reading_status forward to reflect
+// that it is actually being read. Returns nothing useful on a no-op: the
+// guard is in the WHERE clause, so a status this must not touch simply
+// matches no rows.
+//
+// Only two transitions are automatic — unread → reading the first time a
+// position is saved, and unread/reading → finished on reaching the end.
+// `paused` and `finished` are left alone: both are things the reader said
+// deliberately, and re-opening a finished book to check a detail should
+// not quietly mark it unfinished.
+func (s *Store) AdvanceReadingStatus(ctx context.Context, bookID int64, finished bool) error {
+	if finished {
+		_, err := s.db.ExecContext(ctx,
+			`UPDATE books SET reading_status = ? WHERE id = ? AND reading_status IN (?, ?)`,
+			ReadingStatusFinished, bookID, ReadingStatusUnread, ReadingStatusReading)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE books SET reading_status = ? WHERE id = ? AND reading_status = ?`,
+		ReadingStatusReading, bookID, ReadingStatusUnread)
+	return err
+}
+
 func (s *Store) DuplicateGroups(ctx context.Context) ([]DuplicateGroup, error) {
 	rows, err := s.db.QueryContext(ctx, `
         SELECT file_hash
