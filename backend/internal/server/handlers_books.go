@@ -278,6 +278,19 @@ func (s *Server) handleBookContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A slice of a cached EPUB only changes when the scan rewrites that
+	// EPUB, which moves ScannedAt. Reopening a book otherwise re-fetches
+	// every chapter it renders, and on a long book that is the whole book
+	// again on every visit. The range is in the tag because each slice is a
+	// separate resource under the same path.
+	etag := fmt.Sprintf(`"content-%d-%d-%d-%d"`, book.ID, book.ScannedAt, from, want)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, max-age=604800")
+	if match := r.Header.Get("If-None-Match"); match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	runes, err := library.GetFlatRunes(book.Path)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "read_epub", err)

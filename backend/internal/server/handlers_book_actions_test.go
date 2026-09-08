@@ -465,3 +465,62 @@ func escapeServerPDFString(s string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `(`, `\(`, `)`, `\)`)
 	return replacer.Replace(s)
 }
+
+// Reopening a book re-fetches every chapter it renders, so a slice that has
+// not changed has to answer 304. The tag has to move when a rescan rewrites
+// the cached EPUB, and it has to distinguish the slices of one book.
+func TestBookContentIsConditional(t *testing.T) {
+	ctx := context.Background()
+	bookDir := t.TempDir()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	folder, err := st.AddFolder(ctx, bookDir)
+	if err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+	srv := New(Config{Port: 0, Store: st})
+	uploadTestBook(t, srv, "BookA - AuthorX.txt",
+		"Chapter 1\n\n"+strings.Repeat("Alpha beta gamma delta. ", 200)+"\n")
+	book := onlyBook(t, st, folder.ID)
+
+	get := func(path, ifNoneMatch string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		rr := httptest.NewRecorder()
+		testRouter(t, srv).ServeHTTP(rr, req)
+		return rr
+	}
+
+	base := "/api/v1/books/" + itoa(book.ID) + "/content?from=0&len=100"
+	first := get(base, "")
+	if first.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", first.Code, first.Body.String())
+	}
+	etag := first.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("no ETag on a content slice")
+	}
+	if cc := first.Header().Get("Cache-Control"); !strings.Contains(cc, "private") {
+		t.Errorf("Cache-Control = %q, want it marked private", cc)
+	}
+
+	again := get(base, etag)
+	if again.Code != http.StatusNotModified {
+		t.Fatalf("repeat fetch = %d, want 304", again.Code)
+	}
+	if again.Body.Len() != 0 {
+		t.Errorf("304 carried a %d-byte body", again.Body.Len())
+	}
+
+	// A different slice of the same book is a different resource; serving
+	// 304 for it would hand the reader the wrong chapter.
+	other := "/api/v1/books/" + itoa(book.ID) + "/content?from=100&len=100"
+	if rr := get(other, etag); rr.Code != http.StatusOK {
+		t.Errorf("a different range answered %d for the first range's tag", rr.Code)
+	}
+}

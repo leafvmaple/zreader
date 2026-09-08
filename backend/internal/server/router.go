@@ -95,7 +95,7 @@ func (s *Server) newRouter() http.Handler {
 		spa.ServeHTTP(w, r)
 	})
 
-	return logRequests(s, s.requireAuth(mux))
+	return logRequests(s, compressResponses(s.requireAuth(mux)))
 }
 
 // writeJSON sends v as JSON with the given status. Errors during encoding are
