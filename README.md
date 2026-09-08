@@ -412,6 +412,14 @@ reader.example.com {
 }
 ```
 
+## Architecture
+
+[ARCHITECTURE.md](ARCHITECTURE.md) covers why the code is shaped the way it is:
+the three invariants everything else follows from (one cached EPUB format,
+character offsets as the universal coordinate, one static binary), the package
+layering, the reader's chapter-window model, and what the single-binary
+constraint rules out and why.
+
 ## Build from source
 
 Requires Go 1.26+, Node 22+, pnpm 9+.
