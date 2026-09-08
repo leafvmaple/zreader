@@ -67,7 +67,17 @@ export type Progress = {
   char_offset: number;
   chapter_idx: number;
   chapter_offset: number;
+  /** Row version, stamped by the server. Send it back as base_updated_at. */
   updated_at: number;
+};
+
+/** A progress write: the position, plus the version it is based on. */
+export type ProgressWrite = {
+  char_offset: number;
+  chapter_idx: number;
+  chapter_offset: number;
+  /** The updated_at last read back from the server; 0 if none. */
+  base_updated_at: number;
 };
 
 export type ContentSlice = {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/leafvmaple/zreader/internal/store"
 )
@@ -85,7 +86,15 @@ func (s *Server) handlePutProgress(w http.ResponseWriter, r *http.Request) {
 		CharOffset    int64 `json:"char_offset"`
 		ChapterIdx    int64 `json:"chapter_idx"`
 		ChapterOffset int64 `json:"chapter_offset"`
-		UpdatedAt     int64 `json:"updated_at"` // optional, server fills if 0
+		// BaseUpdatedAt is the row version the client last saw, not a
+		// timestamp it made up. 0 means "I have not read this row", which
+		// wins unconditionally — a first write from a fresh device.
+		BaseUpdatedAt int64 `json:"base_updated_at"`
+		// UpdatedAt is the pre-0.14 field, where the client sent its own
+		// wall clock and the server both compared and stored it. Honoured
+		// as a fallback so a browser still running cached JS from before
+		// the upgrade keeps syncing.
+		UpdatedAt int64 `json:"updated_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_json", err)
@@ -93,12 +102,18 @@ func (s *Server) handlePutProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	u := currentUser(r)
 
-	// Stale-write guard: if the existing row has a newer UpdatedAt than the
-	// incoming payload, reject. Clients without a timestamp (UpdatedAt==0)
-	// always win — they explicitly opted out of merge protection.
-	if body.UpdatedAt > 0 {
+	// Stale-write guard. The version to compare against is the one the
+	// client last read back from us; it used to be the client's own clock,
+	// which made the winner of any two-device race whichever device's clock
+	// ran faster. A phone a minute slow was rejected on every write, then
+	// yanked to the other device's position, forever.
+	base := body.BaseUpdatedAt
+	if base == 0 {
+		base = body.UpdatedAt
+	}
+	if base > 0 {
 		if existing, err := s.store.GetProgress(r.Context(), u.ID, bookID); err == nil {
-			if existing.UpdatedAt > body.UpdatedAt {
+			if existing.UpdatedAt > base {
 				writeJSON(w, http.StatusConflict, map[string]any{
 					"error": "stale_write",
 					"server": progressDTO{
@@ -114,13 +129,15 @@ func (s *Server) handlePutProgress(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Stamped here, not by the caller: the row version has to come from one
+	// clock for comparisons between devices to mean anything.
 	p := store.Progress{
 		UserID:        u.ID,
 		BookID:        bookID,
 		CharOffset:    body.CharOffset,
 		ChapterIdx:    body.ChapterIdx,
 		ChapterOffset: body.ChapterOffset,
-		UpdatedAt:     body.UpdatedAt,
+		UpdatedAt:     time.Now().Unix(),
 	}
 	if err := s.store.PutProgress(r.Context(), p); err != nil {
 		writeError(w, http.StatusInternalServerError, "put_progress", err)

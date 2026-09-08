@@ -25,17 +25,36 @@ export function useThrottledProgress({ bookId, intervalMs = 5000, onConflict }: 
   const pending = useRef<Position | null>(null);
   // Set when a flush is scheduled; cleared after it runs.
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Highest UpdatedAt we've successfully written; used as the optimistic
-  // lock value the server checks on the next PUT.
+  // The row version last read back from the server. This is what the
+  // optimistic lock is checked against — it used to be unused, and the
+  // client sent its own wall clock instead, which made the winner of a
+  // two-device race whichever clock ran faster.
   const lastUpdatedAt = useRef<number>(0);
+  // Assigned below, once schedule exists; flush is declared above it and
+  // has to reschedule itself after a failed write.
+  const scheduleRef = useRef<() => void>(() => {});
 
   const flush = useCallback(async () => {
     timer.current = null;
     const pos = pending.current;
     if (!pos) return;
-    pending.current = null;
-    const now = Math.floor(Date.now() / 1000);
-    const result = await putProgress(bookId, { ...pos, updated_at: now });
+
+    let result;
+    try {
+      result = await putProgress(bookId, { ...pos, base_updated_at: lastUpdatedAt.current });
+    } catch (err) {
+      // The position stays pending. It used to be cleared before the
+      // request went out, so a scroll followed by an offline moment lost
+      // it outright — and nothing retried unless you happened to scroll
+      // again, which a reader who has stopped for the night will not.
+      scheduleRef.current();
+      throw err;
+    }
+
+    // Only drop what was actually written, and only if nothing newer
+    // landed while the request was in flight.
+    if (pending.current === pos) pending.current = null;
+
     if (result.ok) {
       lastUpdatedAt.current = result.progress.updated_at;
     } else {
@@ -44,27 +63,32 @@ export function useThrottledProgress({ bookId, intervalMs = 5000, onConflict }: 
     }
   }, [bookId, onConflict]);
 
+  const schedule = useCallback(() => {
+    if (timer.current != null) return;
+    timer.current = setTimeout(() => {
+      // Fire-and-forget: flush keeps the position and reschedules itself
+      // if the write failed.
+      flush().catch((err) => {
+        console.warn('[progress] flush failed:', err);
+      });
+    }, intervalMs);
+  }, [flush, intervalMs]);
+  scheduleRef.current = schedule;
+
   const report = useCallback(
     (pos: Position) => {
       pending.current = pos;
-      if (timer.current != null) return;
-      timer.current = setTimeout(() => {
-        // Fire-and-forget. Errors are swallowed; next report restarts a timer
-        // and the same position will be retried.
-        flush().catch((err) => {
-          console.warn('[progress] flush failed:', err);
-          // schedule a retry on the next report
-          lastUpdatedAt.current = 0;
-        });
-      }, intervalMs);
+      schedule();
     },
-    [flush, intervalMs],
+    [schedule],
   );
 
   // flushBeacon is the terminal write: a keepalive fetch that the browser
   // is obliged to deliver even as the page goes away. We can't await it,
   // so it does not touch lastUpdatedAt — a conflict here would have
-  // nowhere to be reported anyway.
+  // nowhere to be reported anyway. It still carries the base version, so
+  // a tab that has fallen behind another device is refused rather than
+  // clobbering it on the way out.
   const flushBeacon = useCallback(() => {
     const pos = pending.current;
     if (!pos) return;
@@ -76,7 +100,7 @@ export function useThrottledProgress({ bookId, intervalMs = 5000, onConflict }: 
     fetch(`/api/v1/progress/${bookId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...pos, updated_at: Math.floor(Date.now() / 1000) }),
+      body: JSON.stringify({ ...pos, base_updated_at: lastUpdatedAt.current }),
       keepalive: true,
     }).catch(() => {
       /* nothing to do — best effort */

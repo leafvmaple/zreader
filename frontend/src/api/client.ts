@@ -12,7 +12,7 @@ import type {
   DuplicateGroup,
   Folder,
   LibraryJob,
-  Progress,
+  Progress, ProgressWrite,
   ReadingStatus,
   ScanResult,
   SearchMatch,
@@ -387,7 +387,7 @@ export type PutProgressResult =
  */
 export async function putProgress(
   bookId: number,
-  body: Omit<Progress, 'book_id'>,
+  body: ProgressWrite,
 ): Promise<PutProgressResult> {
   try {
     const progress = await request<Progress>(`/api/v1/progress/${bookId}`, {
