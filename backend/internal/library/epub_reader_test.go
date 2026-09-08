@@ -3,9 +3,11 @@ package library
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 )
@@ -323,5 +325,140 @@ func TestFoldForSearchIsRuneForRune(t *testing.T) {
 		if a, b := utf8.RuneCountInString(got), utf8.RuneCountInString(tc.in); a != b {
 			t.Errorf("FoldStringForSearch(%q) changed the rune count: %d -> %d", tc.in, b, a)
 		}
+	}
+}
+
+// resetFlatCache clears the process-wide cache so a test starts cold.
+func resetFlatCache(t *testing.T) {
+	t.Helper()
+	flatCacheMu.Lock()
+	defer flatCacheMu.Unlock()
+	flatCache = map[string]*flatCacheEntry{}
+	flatCacheBytes = 0
+}
+
+// Opening a book fires three requests at once — the chapter and its two
+// neighbours — and each used to run its own parse of the same file.
+func TestGetFlatTextViewSharesConcurrentLoads(t *testing.T) {
+	resetFlatCache(t)
+	text := "Chapter 1\n\n" + strings.Repeat("Alpha beta gamma delta epsilon. ", 400) + "\n"
+	chapters := []Chapter{{Idx: 1, Title: "Chapter 1", Level: 0, ByteOffset: 0}}
+	p := writeEpubToTemp(t, "BookA", "AuthorX", text, chapters)
+
+	const n = 8
+	var wg sync.WaitGroup
+	views := make([]*FlatTextView, n)
+	errs := make([]error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			views[i], errs[i] = GetFlatTextView(p)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("loader %d: %v", i, err)
+		}
+	}
+	// One parse means one view: every caller holds the identical pointer.
+	for i := 1; i < n; i++ {
+		if views[i] != views[0] {
+			t.Fatalf("loader %d got a different view — the parse was not shared", i)
+		}
+	}
+}
+
+// The cache was unbounded on the stated assumption that a personal library
+// stays under a hundred megabytes; the test corpus is 198 MB.
+func TestFlatCacheEvictsLeastRecentlyUsed(t *testing.T) {
+	resetFlatCache(t)
+	original := maxFlatCacheBytes
+	t.Cleanup(func() { maxFlatCacheBytes = original })
+
+	chapters := []Chapter{{Idx: 1, Title: "Chapter 1", Level: 0, ByteOffset: 0}}
+	body := strings.Repeat("甲乙丙丁戊己庚辛壬癸。", 2000)
+
+	paths := make([]string, 3)
+	for i := range paths {
+		paths[i] = writeEpubToTemp(t, fmt.Sprintf("Book%d", i), "AuthorX",
+			"Chapter 1\n\n"+body+"\n", chapters)
+	}
+
+	// Load two and set the budget to exactly what they cost, so adding a
+	// third evicts one and stops — a budget one byte tighter would
+	// correctly evict two, which tests nothing about the order.
+	for _, p := range paths[:2] {
+		if _, err := GetFlatTextView(p); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+	}
+	flatCacheMu.Lock()
+	twoBooks := flatCacheBytes
+	flatCacheMu.Unlock()
+	maxFlatCacheBytes = twoBooks
+
+	// Touch the first so the second is the least recently used.
+	if _, err := GetFlatTextView(paths[0]); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	if _, err := GetFlatTextView(paths[2]); err != nil {
+		t.Fatalf("third load: %v", err)
+	}
+
+	flatCacheMu.Lock()
+	_, hasFirst := flatCache[paths[0]]
+	_, hasSecond := flatCache[paths[1]]
+	_, hasThird := flatCache[paths[2]]
+	held := flatCacheBytes
+	flatCacheMu.Unlock()
+
+	if hasSecond {
+		t.Error("the least recently used book survived; something else was evicted")
+	}
+	if !hasFirst || !hasThird {
+		t.Errorf("wrong entries evicted: first=%v third=%v", hasFirst, hasThird)
+	}
+	if held > maxFlatCacheBytes {
+		t.Errorf("cache holds %d bytes, over the %d budget", held, maxFlatCacheBytes)
+	}
+
+	// An evicted book still reads correctly — it is a cache, not storage.
+	view, err := GetFlatTextView(paths[1])
+	if err != nil {
+		t.Fatalf("reload evicted book: %v", err)
+	}
+	if !strings.Contains(view.Text, "甲乙丙丁") {
+		t.Error("reloaded view is missing its text")
+	}
+}
+
+// A book bigger than the whole budget must still be cached, or every
+// request for it would re-parse the file.
+func TestFlatCacheKeepsAnOversizedBook(t *testing.T) {
+	resetFlatCache(t)
+	original := maxFlatCacheBytes
+	t.Cleanup(func() { maxFlatCacheBytes = original })
+	maxFlatCacheBytes = 1
+
+	chapters := []Chapter{{Idx: 1, Title: "Chapter 1", Level: 0, ByteOffset: 0}}
+	p := writeEpubToTemp(t, "BookBig", "AuthorX",
+		"Chapter 1\n\n"+strings.Repeat("甲乙丙丁。", 500)+"\n", chapters)
+
+	first, err := GetFlatTextView(p)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	second, err := GetFlatTextView(p)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if first != second {
+		t.Error("a book larger than the budget was evicted immediately and re-parsed")
 	}
 }

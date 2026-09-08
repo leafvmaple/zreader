@@ -430,18 +430,48 @@ func imageAltText(el xml.StartElement) string {
 
 // --- Flat-text cache -----------------------------------------------------
 
-// flatCacheEntry stores the rune-indexed view of a cached EPUB plus
-// the (mtime, size) fingerprint that gates invalidation.
+// flatCacheEntry holds one book's derived views plus what invalidates and
+// evicts it: the source fingerprint, its memory cost, and when it was last
+// handed out.
 type flatCacheEntry struct {
 	mtime int64
 	size  int64
 	view  *FlatTextView
+	bytes int64
+	used  int64
+}
+
+// flatLoad lets callers that arrive while a book is being parsed wait for
+// that parse instead of starting their own.
+type flatLoad struct {
+	done chan struct{}
+	view *FlatTextView
+	err  error
 }
 
 var (
-	flatCacheMu sync.RWMutex
-	flatCache   = map[string]flatCacheEntry{}
+	flatCacheMu    sync.Mutex
+	flatCache      = map[string]*flatCacheEntry{}
+	flatInflight   = map[string]*flatLoad{}
+	flatCacheBytes int64
+	flatCacheClock int64
 )
+
+// maxFlatCacheBytes bounds what the cache may hold across all books.
+//
+// The views cost about 10 bytes per character — the text, the folded copy
+// searching scans, and a []rune at 4 bytes each — so the 17-book test
+// corpus comes to 198 MB if every book is opened, and the largest single
+// book to 74 MB. The cache used to be unbounded on the stated assumption
+// that a personal library stays "well under a hundred-megabyte budget",
+// which that corpus already disproves.
+//
+// 192 MB holds the largest book several times over, so the common case
+// never evicts; re-reading an evicted book costs about half a second.
+//
+// A var rather than a const so tests can shrink it and watch eviction
+// happen, instead of asserting around it.
+var maxFlatCacheBytes int64 = 192 << 20
 
 // FlatTextView stores cached, derived views over the EPUB's flat text.
 //
@@ -456,6 +486,10 @@ type FlatTextView struct {
 	// and its folded form is one.
 	FoldedText string
 	Runes      []rune
+}
+
+func (v *FlatTextView) memoryBytes() int64 {
+	return int64(len(v.Text)) + int64(len(v.FoldedText)) + int64(len(v.Runes))*4
 }
 
 // FoldForSearch folds one rune for search matching: full-width forms to
@@ -490,9 +524,11 @@ func FoldStringForSearch(s string) string {
 // absolute path; the entry is considered stale and refreshed when mtime or
 // byte size changes.
 //
-// Cache is unbounded. For personal libraries (tens to low-hundreds of
-// books, each a few MB of plain text) this stays well under
-// hundred-megabyte budget. Add an LRU bound if that changes.
+// Concurrent callers for the same book share one parse. Opening a book
+// fires three requests at once — the chapter and its two neighbours — and
+// each used to run its own ReadEpub: measured on the largest book in the
+// corpus, three concurrent cold loads allocated 1049 MB against 350 MB for
+// one, all to produce the same result three times and throw two away.
 func GetFlatTextView(epubPath string) (*FlatTextView, error) {
 	info, err := os.Stat(epubPath)
 	if err != nil {
@@ -501,28 +537,78 @@ func GetFlatTextView(epubPath string) (*FlatTextView, error) {
 	mtime := info.ModTime().UnixNano()
 	size := info.Size()
 
-	flatCacheMu.RLock()
+	flatCacheMu.Lock()
 	if e, ok := flatCache[epubPath]; ok && e.mtime == mtime && e.size == size {
+		flatCacheClock++
+		e.used = flatCacheClock
 		view := e.view
-		flatCacheMu.RUnlock()
+		flatCacheMu.Unlock()
 		return view, nil
 	}
-	flatCacheMu.RUnlock()
+	if load, ok := flatInflight[epubPath]; ok {
+		flatCacheMu.Unlock()
+		<-load.done
+		return load.view, load.err
+	}
+	load := &flatLoad{done: make(chan struct{})}
+	flatInflight[epubPath] = load
+	flatCacheMu.Unlock()
 
+	view, err := buildFlatTextView(epubPath)
+
+	flatCacheMu.Lock()
+	load.view, load.err = view, err
+	delete(flatInflight, epubPath)
+	if err == nil {
+		storeFlatViewLocked(epubPath, mtime, size, view)
+	}
+	flatCacheMu.Unlock()
+	close(load.done)
+	return view, err
+}
+
+func buildFlatTextView(epubPath string) (*FlatTextView, error) {
 	book, err := ReadEpub(epubPath)
 	if err != nil {
 		return nil, err
 	}
-	view := &FlatTextView{
+	return &FlatTextView{
 		Text:       book.FlatText,
 		FoldedText: FoldStringForSearch(book.FlatText),
 		Runes:      []rune(book.FlatText),
-	}
+	}, nil
+}
 
-	flatCacheMu.Lock()
-	flatCache[epubPath] = flatCacheEntry{mtime: mtime, size: size, view: view}
-	flatCacheMu.Unlock()
-	return view, nil
+// storeFlatViewLocked inserts an entry and evicts least-recently-used ones
+// until the total is back inside the budget. Callers hold flatCacheMu.
+func storeFlatViewLocked(path string, mtime, size int64, view *FlatTextView) {
+	if old, ok := flatCache[path]; ok {
+		flatCacheBytes -= old.bytes
+	}
+	flatCacheClock++
+	entry := &flatCacheEntry{
+		mtime: mtime,
+		size:  size,
+		view:  view,
+		bytes: view.memoryBytes(),
+		used:  flatCacheClock,
+	}
+	flatCache[path] = entry
+	flatCacheBytes += entry.bytes
+
+	// A single book larger than the whole budget still gets to be cached —
+	// evicting it immediately would mean re-parsing on every request.
+	for flatCacheBytes > maxFlatCacheBytes && len(flatCache) > 1 {
+		var oldestPath string
+		var oldest int64
+		for p, e := range flatCache {
+			if oldestPath == "" || e.used < oldest {
+				oldestPath, oldest = p, e.used
+			}
+		}
+		flatCacheBytes -= flatCache[oldestPath].bytes
+		delete(flatCache, oldestPath)
+	}
 }
 
 // GetFlatRunes returns the rune view of the EPUB at path — the flat plain-text
