@@ -163,6 +163,19 @@ const CHUNK = 50_000;
 // adjacent chapter.
 const PREFETCH_TRIGGER = 1.0;
 
+
+// The loaded window is trimmed from the top as you read forward. Without
+// this it only ever grows: 300 chapters read in one sitting is 300
+// chapters mounted, tens of thousands of paragraphs, and memory that is
+// never returned until you leave the page.
+//
+// Nothing within KEEP_ABOVE_VIEWPORTS of the reading position is ever
+// removed, so scrolling back up stays instant and the trim can never take
+// content that is on screen. MIN_WINDOW_CHAPTERS keeps a floor for books
+// whose chapters are a paragraph each.
+const MAX_WINDOW_CHAPTERS = 12;
+const MIN_WINDOW_CHAPTERS = 4;
+const KEEP_ABOVE_VIEWPORTS = 3;
 // Themes that existed before the palette was reworked, mapped to their
 // closest survivor. Without this an upgrading user lands on a class that
 // no longer exists and silently gets the stylesheet's fallback colours.
@@ -942,10 +955,9 @@ export function ReaderPage() {
     // misclassify the active chapter right after a TOC jump.
     const viewport = el.clientHeight;
     const scrollTop = el.scrollTop;
-    const readingPos = scrollTop + chapterTops(el, loadedRange).padTop;
+    const { tops, padTop } = chapterTops(el, loadedRange);
+    const readingPos = scrollTop + padTop;
     const total = book.char_count ?? 0;
-
-    const tops = chapterTops(el, loadedRange).tops;
     let activeIdx = loadedRange.lo;
     let activeTop = 0;
     let activeHeight = el.scrollHeight;
@@ -984,6 +996,35 @@ export function ReaderPage() {
     }
     if (scrollTop < viewport * PREFETCH_TRIGGER) {
       void extendUp();
+    }
+
+    // Drop chapters that are far enough above the viewport to be out of
+    // reach of a scroll back. The text stays in chapterText, so returning
+    // to one costs a re-render and no network; what is reclaimed is the
+    // DOM, which is the part that grows without bound.
+    if (loadedRange.hi - loadedRange.lo + 1 > MAX_WINDOW_CHAPTERS) {
+      const limit = scrollTop - viewport * KEEP_ABOVE_VIEWPORTS;
+      let newLo = loadedRange.lo;
+      let removed = 0;
+      for (const t of tops) {
+        const above = t.top - padTop;
+        if (above <= limit && loadedRange.hi - t.idx + 1 >= MIN_WINDOW_CHAPTERS) {
+          newLo = t.idx;
+          removed = above;
+        }
+      }
+      if (newLo > loadedRange.lo && removed > 0) {
+        setLoadedRange((r) => (r && r.lo < newLo ? { ...r, lo: newLo } : r));
+        // Absolute target, not a relative nudge: by the time this runs the
+        // browser may have adjusted scrollTop itself for the removed
+        // content, and subtracting again would move the page twice.
+        // `instant` for the reason extendUp documents — the container's
+        // smooth scroll-behavior would otherwise animate over this.
+        requestAnimationFrame(() => {
+          const after = scrollRef.current;
+          if (after) after.scrollTo({ top: Math.max(0, scrollTop - removed), behavior: 'instant' });
+        });
+      }
     }
   }, [book, chapters, loadedRange, report, extendDown, extendUp, chapterTops]);
 
