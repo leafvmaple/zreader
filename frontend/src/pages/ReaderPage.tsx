@@ -453,10 +453,40 @@ function TOCList({
 // sentence as an h2 (the "bolded first line" bug). When the leading
 // paragraph doesn't match metaTitle, use the metadata title for the
 // heading and keep every paragraph as body.
+// markTerm splits a paragraph around every occurrence of `term`, so the
+// hit you jumped to is visible instead of having to be found by eye. It
+// works on the term rather than the match's character offset because the
+// paragraph split trims and collapses separators, and the offsets do not
+// survive that — matching the text is both simpler and highlights the
+// other occurrences on screen, which is what a reader expects after a
+// search.
+function markTerm(text: string, term: string): React.ReactNode {
+  if (!term) return text;
+  const haystack = text.toLowerCase();
+  const needle = term.toLowerCase();
+  let from = 0;
+  const out: React.ReactNode[] = [];
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) break;
+    if (at > from) out.push(text.slice(from, at));
+    out.push(
+      <mark key={at} className="reader__hit">
+        {text.slice(at, at + term.length)}
+      </mark>,
+    );
+    from = at + term.length;
+  }
+  if (out.length === 0) return text;
+  if (from < text.length) out.push(text.slice(from));
+  return out;
+}
+
 function renderChapter(
   idx: number,
   text: string,
   metaTitle: string,
+  highlight: string,
 ): React.ReactNode {
   const paragraphs = text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
   const hasTitleLine = paragraphs.length > 0 && paragraphs[0] === metaTitle;
@@ -470,7 +500,7 @@ function renderChapter(
       {bodyParas.length > 0 && (
         <div className="reader__body">
           {bodyParas.map((p, i) => (
-            <p key={i}>{p}</p>
+            <p key={i}>{markTerm(p, highlight)}</p>
           ))}
         </div>
       )}
@@ -527,6 +557,10 @@ export function ReaderPage() {
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMsg, setSearchMsg] = useState<string | null>(null);
   const [searchTotal, setSearchTotal] = useState(0);
+  // The term to mark in the rendered text. Set when following a search
+  // result, cleared by any other kind of jump so it does not linger over
+  // reading you did afterwards.
+  const [highlightTerm, setHighlightTerm] = useState('');
   const [searchNext, setSearchNext] = useState<number | null>(null);
   // Percentage being dragged on the footer progress bar, or null when
   // not scrubbing. Kept separate from `pct` so the bar tracks the finger
@@ -548,6 +582,9 @@ export function ReaderPage() {
   // Assigned once onScroll exists, further down. The jump-apply effect is
   // declared above it and has to invoke it.
   const onScrollRef = useRef<() => void>(() => {});
+  // Set when a jump came from a search result, so the applied scroll can
+  // be corrected onto the highlighted hit itself.
+  const centreOnHitRef = useRef(false);
 
   const { report, flush } = useThrottledProgress({
     bookId,
@@ -790,6 +827,30 @@ export function ReaderPage() {
       // header naming chapter 1 and the progress reading 0%. Worse, that
       // stale position is what the next progress write would save.
       onScrollRef.current();
+
+      // A search result's offset only positions the reader approximately:
+      // the offset-to-pixel mapping is linear over the chapter's measured
+      // height, so the hit can land a screen away from where the jump
+      // stops. The mark itself is exact, so once it is rendered, centre
+      // the one nearest where we landed.
+      if (centreOnHitRef.current) {
+        centreOnHitRef.current = false;
+        requestAnimationFrame(() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          const hits = [...el.querySelectorAll<HTMLElement>('.reader__hit')];
+          if (hits.length === 0) return;
+          const want = el.scrollTop + el.clientHeight / 2;
+          const nearest = hits.reduce((best, h) =>
+            Math.abs(h.offsetTop - want) < Math.abs(best.offsetTop - want) ? h : best,
+          );
+          el.scrollTo({
+            top: Math.max(0, nearest.offsetTop - el.clientHeight / 3),
+            behavior: 'instant',
+          });
+          onScrollRef.current();
+        });
+      }
     }
   }, [loadedRange, chapters, book, applyScrollFromOffset]);
 
@@ -1141,6 +1202,7 @@ export function ReaderPage() {
       setShowTOC(false);
       const target = chapters.find((c) => c.idx === idx);
       if (!target) return;
+      setHighlightTerm('');
       void jumpToOffset(target.char_offset);
     },
     [chapters, jumpToOffset],
@@ -1183,9 +1245,11 @@ export function ReaderPage() {
   const onSearchResultClick = useCallback(
     (offset: number) => {
       setShowSearch(false);
+      setHighlightTerm(searchQuery.trim());
+      centreOnHitRef.current = true;
       void jumpToOffset(offset);
     },
-    [jumpToOffset],
+    [jumpToOffset, searchQuery],
   );
 
   const onAddBookmark = useCallback(async () => {
@@ -1217,6 +1281,7 @@ export function ReaderPage() {
   const onBookmarkClick = useCallback(
     (offset: number) => {
       setShowBookmarks(false);
+      setHighlightTerm('');
       void jumpToOffset(offset);
     },
     [jumpToOffset],
@@ -1240,7 +1305,10 @@ export function ReaderPage() {
     if (scrub === null) return;
     const total = book?.char_count ?? 0;
     setScrub(null);
-    if (total > 0) void jumpToOffset(Math.round((scrub / 100) * total));
+    if (total > 0) {
+      setHighlightTerm('');
+      void jumpToOffset(Math.round((scrub / 100) * total));
+    }
   }, [book, jumpToOffset, scrub]);
 
   const onResetSettings = useCallback(() => {
@@ -1405,7 +1473,7 @@ export function ReaderPage() {
       const text = chapterText.get(idx);
       if (text === undefined) continue;
       const meta = chapters.find((c) => c.idx === idx);
-      renderedChapters.push(renderChapter(idx, text, meta?.title ?? ''));
+      renderedChapters.push(renderChapter(idx, text, meta?.title ?? '', highlightTerm));
     }
   }
 

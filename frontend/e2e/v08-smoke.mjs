@@ -385,6 +385,30 @@ try {
     searchHits = await page.locator('.search-results li').count();
   }
   assert(searchHits > 0, 'search did not return the reparsed text');
+  assert(
+    /共 \d+ 处/.test(await page.locator('.search-results__count').innerText()),
+    'search did not report how many matches the whole book holds',
+  );
+
+  // Following a result marks the term and brings that mark into view — the
+  // offset alone only positions the reader approximately, so landing a
+  // screen away from the hit used to mean finding it by eye.
+  await page.locator('.search-results li').first().locator('button').click();
+  await page.waitForTimeout(1200);
+  const hitInView = await page.evaluate(() => {
+    const marks = [...document.querySelectorAll('.reader__hit')];
+    if (marks.length === 0) return 'no mark rendered';
+    return marks.some((m) => {
+      const r = m.getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= window.innerHeight;
+    })
+      ? 'ok'
+      : 'mark rendered but off-screen';
+  });
+  assert(hitInView === 'ok', `search result did not centre on its match: ${hitInView}`);
+
+  await page.locator('.reader__top button.reader__icon-btn').nth(0).click();
+  await page.waitForSelector('.reader-search');
 
   // The reader binds Space/arrows globally to page the book. Typing into
   // the search box must still reach the box: a query with a space in it

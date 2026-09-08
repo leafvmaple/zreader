@@ -634,6 +634,22 @@
   overflow-y: auto;
 }
 
+/* The searched term, marked in the body after following a result. Painted
+   from the theme's own accent rather than the browser's yellow, which is
+   both out of place on every surface here and far more saturated than
+   anything else in the reader. Background only — recolouring the text
+   would fight the theme's contrast. */
+.reader__hit {
+  /* Two declarations, not one: a browser without color-mix drops that
+     line and would otherwise render no highlight at all. The fallback is
+     theme-neutral, so it reads on both light and dark surfaces. */
+  background: rgba(127, 127, 127, 0.28);
+  background: color-mix(in srgb, var(--r-accent) 26%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 /* How many hits the book holds, against how many are on screen — on a long
    book the first page is a small slice of the answer, and without this the
    list looks like the whole of it. */
