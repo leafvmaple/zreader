@@ -461,6 +461,40 @@ try {
   );
   await page.keyboard.press('Escape');
 
+  // The reader's drawers are modal surfaces, and the keyboard has to be
+  // able to use them: focus moves in, Tab stays inside, and closing hands
+  // focus back to the control that opened it.
+  const tocButton = page.locator('.reader__bottom button.reader__icon-btn').nth(0);
+  await tocButton.focus();
+  const openerLabel = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+  await tocButton.click();
+  await page.waitForSelector('.drawer__panel');
+  await page.waitForTimeout(200);
+  const drawer = await page.evaluate(() => {
+    const p = document.querySelector('.drawer__panel');
+    return {
+      modal: p.getAttribute('aria-modal'),
+      closeLabel: p.querySelector('.drawer__close')?.getAttribute('aria-label'),
+      focusInside: p.contains(document.activeElement),
+    };
+  });
+  assert(drawer.modal === 'true', 'reader drawer is not marked aria-modal');
+  assert(drawer.closeLabel === '关闭', 'drawer close button has no accessible name');
+  assert(drawer.focusInside, 'opening a drawer left focus outside it');
+  for (let i = 0; i < 25; i += 1) {
+    await page.keyboard.press('Tab');
+    const inside = await page.evaluate(() =>
+      document.querySelector('.drawer__panel')?.contains(document.activeElement),
+    );
+    assert(inside, `Tab escaped the drawer after ${i + 1} presses`);
+  }
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  assert(
+    (await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))) === openerLabel,
+    'closing the drawer did not return focus to the button that opened it',
+  );
+
   // Settings now lives in the bottom bar (TOC=0, bookmarks=1, settings=2).
   await page.locator('.reader__bottom button.reader__icon-btn').nth(2).click();
   await page.locator('.settings__seg').nth(0).locator('button').nth(0).click();

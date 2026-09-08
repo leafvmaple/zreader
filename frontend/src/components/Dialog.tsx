@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
+import { useModalFocus } from '../hooks/useModalFocus';
 import './Dialog.css';
 
 // Dialog is the shared modal shell. The shelf's three dialogs used to
@@ -25,6 +26,11 @@ export function Dialog({ title, onClose, busy, compact, children, footer }: Prop
     if (!busy) onClose();
   }, [busy, onClose]);
 
+  // Focus in on open, Tab kept inside, focus back to the opener on close.
+  // The last part used to be missing: closing a dialog dropped focus onto
+  // <body>, so the next Tab restarted from the top of the page.
+  useModalFocus(panelRef);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -33,9 +39,6 @@ export function Dialog({ title, onClose, busy, compact, children, footer }: Prop
       }
     };
     document.addEventListener('keydown', onKey);
-    // Move focus into the dialog so Escape and Tab act on it rather than
-    // on whatever button happened to open it.
-    panelRef.current?.focus();
     const { overflow } = document.body.style;
     document.body.style.overflow = 'hidden';
     return () => {

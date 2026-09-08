@@ -132,6 +132,15 @@
   --r-line-color: rgba(255, 255, 255, 0.08);
 }
 
+/* The global focus ring in index.css is painted from the shelf's accent,
+   which is a different hue from every reader theme and reads as a stray
+   colour on paper and on black. Same ring, the current surface's accent. */
+.reader :focus-visible {
+  outline: 2px solid var(--r-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* --- Chrome bars --------------------------------------------------------- */
 
 .reader__top,

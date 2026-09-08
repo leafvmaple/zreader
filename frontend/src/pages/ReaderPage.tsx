@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import type { MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as api from '../api/client';
+import { ReaderDrawer } from '../components/ReaderDrawer';
 import { useThrottledProgress } from '../hooks/useThrottledProgress';
 import { useWindowedList } from '../hooks/useWindowedList';
 import type { Book, Bookmark, Chapter, Progress, ReadingFont, SearchMatch } from '../types/api';
@@ -1451,38 +1452,29 @@ export function ReaderPage() {
         )}
 
         {showTOC && (
-          <div className="drawer" onClick={() => setShowTOC(false)}>
-            <aside
-              className="drawer__panel drawer__panel--narrow"
-              onClick={(e) => e.stopPropagation()}
-              role="dialog"
-              aria-label="页面目录"
-            >
-              <header className="drawer__header">
-                <h3>页面</h3>
-                <button className="drawer__close" onClick={() => setShowTOC(false)}>
-                  ✕
-                </button>
-              </header>
-              <ul className="toc toc--pdf">
-                {chapters.map((c) => (
-                  <li
-                    key={c.idx}
-                    className={`toc__node toc__node--d0${c.idx === currentChapter ? ' toc__node--active' : ''}`}
+          <ReaderDrawer
+            title="目录"
+            onClose={() => setShowTOC(false)}
+            narrow
+          >
+            <ul className="toc toc--pdf">
+              {chapters.map((c) => (
+                <li
+                  key={c.idx}
+                  className={`toc__node toc__node--d0${c.idx === currentChapter ? ' toc__node--active' : ''}`}
+                >
+                  <button
+                    onClick={() => {
+                      setShowTOC(false);
+                      goPDFPage(c.idx);
+                    }}
                   >
-                    <button
-                      onClick={() => {
-                        setShowTOC(false);
-                        goPDFPage(c.idx);
-                      }}
-                    >
-                      {c.title}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </aside>
-          </div>
+                    {c.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </ReaderDrawer>
         )}
       </div>
     );
@@ -1637,309 +1629,272 @@ export function ReaderPage() {
 
       {/* --- TOC drawer ---------------------------------------------------- */}
       {showTOC && (
-        <div className="drawer" onClick={() => setShowTOC(false)}>
-          <aside
-            className="drawer__panel"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="章节目录"
-          >
-            <header className="drawer__header">
-              <h3>目录</h3>
-              <button className="drawer__close" onClick={() => setShowTOC(false)}>
-                ✕
-              </button>
-            </header>
-            <TOCList
-              chapters={chapters}
-              currentChapter={currentChapter}
-              onJump={onChapterClick}
-            />
-          </aside>
-        </div>
+        <ReaderDrawer title="章节目录" onClose={() => setShowTOC(false)}>
+          <TOCList
+            chapters={chapters}
+            currentChapter={currentChapter}
+            onJump={onChapterClick}
+          />
+        </ReaderDrawer>
       )}
 
       {/* --- Search drawer ------------------------------------------------- */}
       {showSearch && (
-        <div className="drawer" onClick={() => setShowSearch(false)}>
-          <aside
-            className="drawer__panel"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="书内搜索"
+        <ReaderDrawer
+            title="搜索"
+            onClose={() => setShowSearch(false)}
           >
-            <header className="drawer__header">
-              <h3>书内搜索</h3>
-              <button className="drawer__close" onClick={() => setShowSearch(false)}>
-                ✕
-              </button>
-            </header>
-            <form
-              className="reader-search"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void onSearch();
-              }}
+          <form
+            className="reader-search"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void onSearch();
+            }}
+          >
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索正文"
+            />
+            <button type="submit" disabled={searchBusy}>
+              {searchBusy ? '搜索中…' : '搜索'}
+            </button>
+          </form>
+          {searchMsg && <div className="drawer__message">{searchMsg}</div>}
+          {searchTotal > 0 && (
+            <div className="search-results__count">
+              共 {searchTotal} 处，已显示 {searchResults.length}
+            </div>
+          )}
+          <ul className="search-results">
+            {searchResults.map((m) => (
+              <li key={`${m.char_offset}-${m.chapter_idx}`}>
+                <button onClick={() => onSearchResultClick(m.char_offset)}>
+                  <span className="search-results__chapter">
+                    {chapters.find((c) => c.idx === m.chapter_idx)?.title ?? `第 ${m.chapter_idx} 章`}
+                  </span>
+                  <span className="search-results__snippet">{m.snippet}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {searchNext !== null && (
+            <button
+              type="button"
+              className="search-results__more"
+              disabled={searchBusy}
+              onClick={() => void runSearch(searchNext)}
             >
-              <input
-                autoFocus
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索正文"
-              />
-              <button type="submit" disabled={searchBusy}>
-                {searchBusy ? '搜索中…' : '搜索'}
-              </button>
-            </form>
-            {searchMsg && <div className="drawer__message">{searchMsg}</div>}
-            {searchTotal > 0 && (
-              <div className="search-results__count">
-                共 {searchTotal} 处，已显示 {searchResults.length}
-              </div>
-            )}
-            <ul className="search-results">
-              {searchResults.map((m) => (
-                <li key={`${m.char_offset}-${m.chapter_idx}`}>
-                  <button onClick={() => onSearchResultClick(m.char_offset)}>
-                    <span className="search-results__chapter">
-                      {chapters.find((c) => c.idx === m.chapter_idx)?.title ?? `第 ${m.chapter_idx} 章`}
-                    </span>
-                    <span className="search-results__snippet">{m.snippet}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {searchNext !== null && (
-              <button
-                type="button"
-                className="search-results__more"
-                disabled={searchBusy}
-                onClick={() => void runSearch(searchNext)}
-              >
-                {searchBusy ? '加载中…' : '加载更多'}
-              </button>
-            )}
-          </aside>
-        </div>
+              {searchBusy ? '加载中…' : '加载更多'}
+            </button>
+          )}
+        </ReaderDrawer>
       )}
 
       {/* --- Bookmark drawer ---------------------------------------------- */}
       {showBookmarks && (
-        <div className="drawer" onClick={() => setShowBookmarks(false)}>
-          <aside
-            className="drawer__panel"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="书签"
+        <ReaderDrawer
+            title="书签"
+            onClose={() => setShowBookmarks(false)}
           >
-            <header className="drawer__header">
-              <h3>书签</h3>
-              <button className="drawer__close" onClick={() => setShowBookmarks(false)}>
-                ✕
-              </button>
-            </header>
-            <div className="bookmark-actions">
-              <button type="button" onClick={onAddBookmark}>
-                添加当前位置
-              </button>
-            </div>
-            {bookmarks.length === 0 ? (
-              <div className="drawer__message">还没有书签</div>
-            ) : (
-              <ul className="bookmark-list">
-                {bookmarks.map((b) => {
-                  const chapterTitle =
-                    chapters.find((c) => c.idx === b.chapter_idx)?.title ??
-                    `位置 ${b.char_offset.toLocaleString()}`;
-                  return (
-                    <li key={b.id}>
-                      <div className="bookmark-list__row">
-                        <button className="bookmark-list__jump" onClick={() => onBookmarkClick(b.char_offset)}>
-                          <span>{chapterTitle}</span>
-                          <small>{b.char_offset.toLocaleString()} 字</small>
-                        </button>
-                        <button className="bookmark-list__delete" onClick={() => void onDeleteBookmark(b.id)}>
-                          删除
-                        </button>
-                      </div>
-                      {editingNote === b.id ? (
-                        <input
-                          autoFocus
-                          className="bookmark-list__note-input"
-                          defaultValue={b.note ?? ''}
-                          maxLength={500}
-                          placeholder="写点什么…"
-                          onBlur={(e) => void onSaveBookmarkNote(b.id, e.target.value.trim())}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') e.currentTarget.blur();
-                            if (e.key === 'Escape') {
-                              e.stopPropagation();
-                              setEditingNote(null);
-                            }
-                          }}
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          className={`bookmark-list__note${b.note ? '' : ' is-empty'}`}
-                          onClick={() => setEditingNote(b.id)}
-                        >
-                          {b.note || '添加备注'}
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </aside>
-        </div>
+          <div className="bookmark-actions">
+            <button type="button" onClick={onAddBookmark}>
+              添加当前位置
+            </button>
+          </div>
+          {bookmarks.length === 0 ? (
+            <div className="drawer__message">还没有书签</div>
+          ) : (
+            <ul className="bookmark-list">
+              {bookmarks.map((b) => {
+                const chapterTitle =
+                  chapters.find((c) => c.idx === b.chapter_idx)?.title ??
+                  `位置 ${b.char_offset.toLocaleString()}`;
+                return (
+                  <li key={b.id}>
+                    <div className="bookmark-list__row">
+                      <button className="bookmark-list__jump" onClick={() => onBookmarkClick(b.char_offset)}>
+                        <span>{chapterTitle}</span>
+                        <small>{b.char_offset.toLocaleString()} 字</small>
+                      </button>
+                      <button className="bookmark-list__delete" onClick={() => void onDeleteBookmark(b.id)}>
+                        删除
+                      </button>
+                    </div>
+                    {editingNote === b.id ? (
+                      <input
+                        autoFocus
+                        className="bookmark-list__note-input"
+                        defaultValue={b.note ?? ''}
+                        maxLength={500}
+                        placeholder="写点什么…"
+                        onBlur={(e) => void onSaveBookmarkNote(b.id, e.target.value.trim())}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                          if (e.key === 'Escape') {
+                            e.stopPropagation();
+                            setEditingNote(null);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className={`bookmark-list__note${b.note ? '' : ' is-empty'}`}
+                        onClick={() => setEditingNote(b.id)}
+                      >
+                        {b.note || '添加备注'}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </ReaderDrawer>
       )}
 
       {/* --- Settings drawer ---------------------------------------------- */}
       {showSettings && (
-        <div className="drawer" onClick={() => setShowSettings(false)}>
-          <aside
-            className="drawer__panel drawer__panel--narrow"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="阅读设置"
+        <ReaderDrawer
+            title="阅读设置"
+            onClose={() => setShowSettings(false)}
           >
-            <header className="drawer__header">
-              <h3>阅读设置</h3>
-              <button className="drawer__close" onClick={() => setShowSettings(false)}>
-                ✕
-              </button>
-            </header>
-            <div className="settings">
-              <div className="settings__row">
-                <span className="settings__label">主题</span>
-                <div className="settings__themes">
-                  {THEME_SWATCHES.map((t) => (
-                    <button
-                      key={t.key}
-                      className={`theme-swatch theme-swatch--${t.key}${settings.theme === t.key ? ' is-active' : ''}`}
-                      onClick={() => setSettings((s) => ({ ...s, theme: t.key }))}
-                      aria-label={t.label}
-                      aria-pressed={settings.theme === t.key}
-                      title={t.label}
-                    />
-                  ))}
-                </div>
+          <div className="settings">
+            <div className="settings__row">
+              <span className="settings__label">主题</span>
+              <div className="settings__themes">
+                {THEME_SWATCHES.map((t) => (
+                  <button
+                    key={t.key}
+                    className={`theme-swatch theme-swatch--${t.key}${settings.theme === t.key ? ' is-active' : ''}`}
+                    onClick={() => setSettings((s) => ({ ...s, theme: t.key }))}
+                    aria-label={t.label}
+                    aria-pressed={settings.theme === t.key}
+                    title={t.label}
+                  />
+                ))}
               </div>
-              <div className="settings__row">
-                <span className="settings__label">字号</span>
-                <div className="settings__sizes">
-                  {(['sm', 'md', 'lg', 'xl'] as FontSize[]).map((sz) => (
-                    <button
-                      key={sz}
-                      className={`size-btn size-btn--${sz}${settings.size === sz ? ' is-active' : ''}`}
-                      onClick={() => setSettings((s) => ({ ...s, size: sz }))}
-                    >
-                      A
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="settings__row">
-                <span className="settings__label">字体</span>
-                <div className="settings__fonts">
-                  {BUILTIN_FONTS.map((f) => (
-                    <button
-                      key={f.key}
-                      className={`font-btn font-btn--${f.key}${settings.font === f.key ? ' is-active' : ''}`}
-                      onClick={() => setSettings((s) => ({ ...s, font: f.key }))}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-                {customFonts.length > 0 && (
-                  <div className="settings__fonts settings__fonts--custom">
-                    {customFonts.map((f) => (
-                      <button
-                        key={f.file}
-                        className={`font-btn font-btn--custom${
-                          settings.font === 'custom' && settings.customFont === f.file ? ' is-active' : ''
-                        }`}
-                        onClick={() => setSettings((s) => ({ ...s, font: 'custom', customFont: f.file }))}
-                        title={f.name}
-                      >
-                        {f.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <p className="settings__hint">
-                  内置字体全部来自系统，不联网。把 woff2 / ttf 放进 <code>&lt;data&gt;/fonts</code> 可以加入这个列表。
-                </p>
-              </div>
-              <div className="settings__row">
-                <span className="settings__label">行距</span>
-                <div className="settings__seg">
-                  {(['compact', 'normal', 'loose'] as LineHeight[]).map((v) => (
-                    <button
-                      key={v}
-                      className={settings.line === v ? 'is-active' : ''}
-                      onClick={() => setSettings((s) => ({ ...s, line: v }))}
-                    >
-                      {LINE_LABELS[v]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="settings__row">
-                <span className="settings__label">段距</span>
-                <div className="settings__seg">
-                  {(['compact', 'normal', 'loose'] as ParagraphGap[]).map((v) => (
-                    <button
-                      key={v}
-                      className={settings.gap === v ? 'is-active' : ''}
-                      onClick={() => setSettings((s) => ({ ...s, gap: v }))}
-                    >
-                      {GAP_LABELS[v]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="settings__row">
-                <span className="settings__label">版面</span>
-                <div className="settings__seg">
-                  {(['narrow', 'normal', 'wide'] as PageWidth[]).map((v) => (
-                    <button
-                      key={v}
-                      className={settings.width === v ? 'is-active' : ''}
-                      onClick={() => setSettings((s) => ({ ...s, width: v }))}
-                    >
-                      {WIDTH_LABELS[v]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="settings__row">
-                <span className="settings__label">首行缩进</span>
-                <div className="settings__seg">
-                  {(['indent', 'flush'] as IndentMode[]).map((v) => (
-                    <button
-                      key={v}
-                      className={settings.indent === v ? 'is-active' : ''}
-                      onClick={() => setSettings((s) => ({ ...s, indent: v }))}
-                    >
-                      {v === 'indent' ? '开启' : '关闭'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="settings__reset"
-                onClick={onResetSettings}
-              >
-                恢复默认设置
-              </button>
             </div>
-          </aside>
-        </div>
+            <div className="settings__row">
+              <span className="settings__label">字号</span>
+              <div className="settings__sizes">
+                {(['sm', 'md', 'lg', 'xl'] as FontSize[]).map((sz) => (
+                  <button
+                    key={sz}
+                    className={`size-btn size-btn--${sz}${settings.size === sz ? ' is-active' : ''}`}
+                    aria-pressed={settings.size === sz}
+                    onClick={() => setSettings((s) => ({ ...s, size: sz }))}
+                  >
+                    A
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="settings__row">
+              <span className="settings__label">字体</span>
+              <div className="settings__fonts">
+                {BUILTIN_FONTS.map((f) => (
+                  <button
+                    key={f.key}
+                    className={`font-btn font-btn--${f.key}${settings.font === f.key ? ' is-active' : ''}`}
+                    aria-pressed={settings.font === f.key}
+                    onClick={() => setSettings((s) => ({ ...s, font: f.key }))}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              {customFonts.length > 0 && (
+                <div className="settings__fonts settings__fonts--custom">
+                  {customFonts.map((f) => (
+                    <button
+                      key={f.file}
+                      className={`font-btn font-btn--custom${
+                        settings.font === 'custom' && settings.customFont === f.file ? ' is-active' : ''
+                      }`}
+                      onClick={() => setSettings((s) => ({ ...s, font: 'custom', customFont: f.file }))}
+                      title={f.name}
+                    >
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="settings__hint">
+                内置字体全部来自系统，不联网。把 woff2 / ttf 放进 <code>&lt;data&gt;/fonts</code> 可以加入这个列表。
+              </p>
+            </div>
+            <div className="settings__row">
+              <span className="settings__label">行距</span>
+              <div className="settings__seg">
+                {(['compact', 'normal', 'loose'] as LineHeight[]).map((v) => (
+                  <button
+                    key={v}
+                    className={settings.line === v ? 'is-active' : ''}
+                    aria-pressed={settings.line === v}
+                    onClick={() => setSettings((s) => ({ ...s, line: v }))}
+                  >
+                    {LINE_LABELS[v]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="settings__row">
+              <span className="settings__label">段距</span>
+              <div className="settings__seg">
+                {(['compact', 'normal', 'loose'] as ParagraphGap[]).map((v) => (
+                  <button
+                    key={v}
+                    className={settings.gap === v ? 'is-active' : ''}
+                    aria-pressed={settings.gap === v}
+                    onClick={() => setSettings((s) => ({ ...s, gap: v }))}
+                  >
+                    {GAP_LABELS[v]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="settings__row">
+              <span className="settings__label">版面</span>
+              <div className="settings__seg">
+                {(['narrow', 'normal', 'wide'] as PageWidth[]).map((v) => (
+                  <button
+                    key={v}
+                    className={settings.width === v ? 'is-active' : ''}
+                    aria-pressed={settings.width === v}
+                    onClick={() => setSettings((s) => ({ ...s, width: v }))}
+                  >
+                    {WIDTH_LABELS[v]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="settings__row">
+              <span className="settings__label">首行缩进</span>
+              <div className="settings__seg">
+                {(['indent', 'flush'] as IndentMode[]).map((v) => (
+                  <button
+                    key={v}
+                    className={settings.indent === v ? 'is-active' : ''}
+                    aria-pressed={settings.indent === v}
+                    onClick={() => setSettings((s) => ({ ...s, indent: v }))}
+                  >
+                    {v === 'indent' ? '开启' : '关闭'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="settings__reset"
+              onClick={onResetSettings}
+            >
+              恢复默认设置
+            </button>
+          </div>
+        </ReaderDrawer>
       )}
     </div>
   );
